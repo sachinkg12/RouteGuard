@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="RouteGuard: cost-aware abstention for text classification. Defer uncertain items to human review when a wrong auto-decision costs more than a deferral.">
+  <title>RouteGuard · Cost-Aware Abstention</title>
+  <script>document.documentElement.classList.add('js');</script>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <aside class="side-nav" aria-label="Project navigation">
+    <a class="brand" href="#overview" aria-label="RouteGuard home">
+      <span class="mark" aria-hidden="true">R</span>
+      <span><b>RouteGuard</b><small>Cost-Aware Abstention</small></span>
+    </a>
+    <nav>
+      <a href="#overview"><span>01</span>Overview</a>
+      <a href="#cost"><span>02</span>The cost problem</a>
+      <a href="#pipeline"><span>03</span>How it works</a>
+      <a href="#explorer"><span>04</span>Operating point</a>
+      <a href="#results"><span>05</span>Findings</a>
+      <a href="#reproduce"><span>06</span>Reproduce</a>
+      <a href="#extend"><span>07</span>Extend</a>
+      <a href="#limitations"><span>08</span>Limitations</a>
+    </nav>
+    <div class="side-meta">
+      <a href="https://github.com/sachinkg12/RouteGuard">GitHub source ↗</a>
+      <span>Evaluation framework</span>
+    </div>
+  </aside>
+
+  <main>
+    <section class="hero" id="overview">
+      <div class="eyebrow">Selective prediction for text classification</div>
+      <h1>Know when <span>not to answer.</span></h1>
+      <p class="lede">RouteGuard measures whether a classifier should auto-decide or
+        defer an uncertain item to a human, when a wrong auto-decision costs far
+        more than a deferral. It reports calibration, coverage, and expected cost,
+        not just accuracy.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/sachinkg12/RouteGuard">View source</a>
+        <a class="button secondary" href="#reproduce">Reproduce it</a>
+      </div>
+
+      <div class="decision-strip" aria-label="Routing decision and its costs">
+        <div class="ds-node ds-in"><b>Ticket</b><span>incoming text</span></div>
+        <i aria-hidden="true">→</i>
+        <div class="ds-node ds-conf"><b>Confidence</b><span>score vs. threshold τ</span></div>
+        <i aria-hidden="true">→</i>
+        <div class="ds-branch" aria-hidden="true"></div>
+        <div class="ds-outs">
+          <div class="ds-out out-route"><b>Auto-route</b><span>confident</span></div>
+          <div class="ds-out out-defer"><b>Defer</b><span>uncertain</span></div>
+        </div>
+      </div>
+
+      <div class="cost-legend" aria-label="Cost of each outcome">
+        <span class="cl-item"><i class="dot route"></i>Correct route<b>0</b></span>
+        <span class="cl-item"><i class="dot defer"></i>Human triage<b>1</b></span>
+        <span class="cl-item"><i class="dot wrong"></i>Wrong route<b>5</b></span>
+        <span class="cl-note">A wrong auto-route costs 5&times; a deferral. Abstention trades cheap deferrals for expensive mistakes.</span>
+      </div>
+    </section>
+
+    <section class="section" id="cost">
+      <div class="section-heading">
+        <span>02 · The cost problem</span>
+        <h2>Accuracy hides the expensive mistakes.</h2>
+        <p>Two systems with the same accuracy are not equally good if one makes its
+          errors on decisions that are costly to reverse. RouteGuard scores the
+          decision, not just the label, under an asymmetric cost model.</p>
+      </div>
+
+      <div class="cost-formula" aria-label="Expected cost per item">
+        <div class="cf-lhs">E[cost]</div>
+        <div class="cf-eq">=</div>
+        <div class="cf-terms">
+          <span class="cf-term t-defer"><b>(1 − coverage)</b><small>deferred → human triage, cost 1</small></span>
+          <span class="cf-op">+</span>
+          <span class="cf-term t-wrong"><b>coverage × (1 − routed acc) × 5</b><small>auto-routed but wrong, cost 5</small></span>
+          <span class="cf-op">+</span>
+          <span class="cf-term t-route"><b>0</b><small>auto-routed and correct, cost 0</small></span>
+        </div>
+      </div>
+      <p class="note">Coverage is the share of items auto-routed; the rest are deferred.
+        Raising the confidence threshold defers more, lowering wrong-route rate but
+        paying more triage. The cost model finds the balance.</p>
+    </section>
+
+    <section class="section pipeline" id="pipeline">
+      <div class="section-heading">
+        <span>03 · How it works</span>
+        <h2>A pipeline that separates every concern.</h2>
+        <p>Prediction, confidence, abstention, and cost are independent stages. The
+          evaluator never inspects a predictor's internals, so a new model or policy
+          plugs in without touching it.</p>
+      </div>
+
+      <div class="flow" id="flow" aria-label="RouteGuard evaluation pipeline">
+        <div class="flow-step" data-step="0"><b>Predictor</b><span>label + score</span></div>
+        <div class="flow-step" data-step="1"><b>Confidence</b><span>calibrate the score</span></div>
+        <div class="flow-step" data-step="2"><b>Abstention</b><span>route or defer</span></div>
+        <div class="flow-step" data-step="3"><b>Cost model</b><span>expected cost</span></div>
+        <div class="flow-step" data-step="4"><b>Evaluator</b><span>tables + figures</span></div>
+        <svg class="flow-track" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+          <line x1="0" y1="3" x2="100" y2="3"></line>
+          <circle class="flow-token" cx="0" cy="3" r="1.6"></circle>
+        </svg>
+      </div>
+
+      <div class="feature-grid">
+        <article><span>Predictors</span><h3>Classical &amp; LLM</h3><p>TF-IDF (LR / SVM / RF), fine-tuned DistilBERT, and prompted LLMs share one interface.</p></article>
+        <article><span>Confidence</span><h3>Calibrated scores</h3><p>Model-reported, cross-predictor agreement, or isotonic recalibration fit on a held-out split.</p></article>
+        <article><span>Abstention</span><h3>Threshold policies</h3><p>Route above a confidence threshold; defer below it. Always-route is the baseline.</p></article>
+        <article><span>Cost</span><h3>Asymmetric &amp; swept</h3><p>Configurable (c_ok, c_triage, c_wrong), evaluated across a grid so conclusions are not tied to one setting.</p></article>
+      </div>
+    </section>
+
+    <section class="section explorer" id="explorer">
+      <div class="section-heading">
+        <span>04 · Operating point</span>
+        <h2>Move the cost. Watch the winner change.</h2>
+        <p>These are the measured operating points of the strongest classical baseline.
+          Drag the wrong-route cost: the expected-cost curve and the cost-minimizing
+          threshold update live.</p>
+      </div>
+
+      <div class="explorer-shell">
+        <div class="explorer-controls">
+          <label for="cwrong">Wrong-route cost <span class="hint">(triage fixed at 1, correct route at 0)</span></label>
+          <div class="slider-row">
+            <input id="cwrong" type="range" min="2" max="20" step="1" value="5" aria-describedby="cwrong-out">
+            <output id="cwrong-out">5&times;</output>
+          </div>
+          <div class="explorer-verdict">
+            <div class="ev-block">
+              <span>Cost-minimizing policy</span>
+              <strong id="best-policy">τ = 0.60</strong>
+            </div>
+            <div class="ev-block">
+              <span>Expected cost</span>
+              <strong id="best-cost">0.472</strong>
+            </div>
+            <div class="ev-block">
+              <span>vs. always-route</span>
+              <strong id="best-delta" class="good">−38.1%</strong>
+            </div>
+          </div>
+          <p class="ev-read" id="explorer-read"></p>
+        </div>
+        <div class="explorer-chart">
+          <div class="chart-head"><span class="detail-kind">Expected cost by policy</span></div>
+          <div id="cost-bars" class="cost-bars" role="img" aria-label="Expected cost for each threshold policy"></div>
+        </div>
+      </div>
+      <p class="diagram-hint">Low wrong-route cost favors auto-routing everything; as the
+        cost of a mistake rises, deferring more (a higher threshold) wins. The evaluator
+        computes this across a full grid of cost settings.</p>
+    </section>
+
+    <section class="section results" id="results">
+      <div class="section-heading">
+        <span>05 · Findings</span>
+        <h2>What the framework measured</h2>
+        <p>On a public 47,837-ticket support dataset (8 classes, 70/10/20 split). Cost
+          model (c_ok, c_triage, c_wrong) = (0, 1, 5).</p>
+      </div>
+      <div class="score-grid">
+        <div class="score hero-score"><strong data-count="38.1" data-suffix="%">38.1%</strong><span>lower expected cost than always-routing (best classical baseline)</span></div>
+        <div class="score"><strong data-count="0.863">0.863</strong><span>best classical accuracy (Linear SVM)</span></div>
+        <div class="score"><strong data-count="95.0" data-suffix="%">95.0%</strong><span>routed accuracy at the chosen threshold</span></div>
+        <div class="score"><strong data-count="70.5" data-suffix="%">70.5%</strong><span>coverage (share auto-routed)</span></div>
+        <div class="score"><strong data-count="3.5" data-suffix="%">3.5%</strong><span>wrong-route rate</span></div>
+        <div class="score"><strong data-count="86" data-prefix="≥" data-suffix="%">≥86%</strong><span>ECE reduction from isotonic recalibration</span></div>
+      </div>
+      <p class="note">Cost reductions range 35.5–38.1% across the four non-LLM baselines
+        (TF-IDF+LR, Linear SVM, Random Forest, DistilBERT). Numbers describe this
+        dataset under the stated cost model; they are not a claim of general or
+        production performance.</p>
+    </section>
+
+    <section class="section reproduce" id="reproduce">
+      <div class="section-heading">
+        <span>06 · Reproduce</span>
+        <h2>One synthetic run needs no data or keys.</h2>
+        <p>The default client is a no-op mock; nothing calls an external API unless a
+          config opts in. Every run snapshots its config, seeds, dataset hash, and
+          package versions.</p>
+      </div>
+      <div class="steps">
+        <div><b>1</b><h3>Install</h3><code>pip install -e '.[test]'</code></div>
+        <div><b>2</b><h3>Smoke run</h3><code>python scripts/run_classification.py --config configs/experiment_small_debug.yaml</code></div>
+        <div><b>3</b><h3>Test</h3><code>pytest</code></div>
+        <div><b>4</b><h3>Inspect</h3><code>ls outputs/&lt;run&gt;/paper_bundle/</code></div>
+      </div>
+      <div class="command-block" aria-label="Headline classical run">
+        <div><span></span><span></span><span></span><b>headline classical run (no API calls)</b></div>
+        <pre><code># place the public CSV at data/it_service_tickets.csv, then:
+python scripts/prepare_data.py    --config configs/experiment_default.yaml
+python scripts/run_classification.py --config configs/experiment_default.yaml
+
+# rebuild the cost sweep from a saved run, no re-prediction:
+python scripts/run_cost_analysis.py --run-dir outputs/&lt;run&gt;</code></pre>
+      </div>
+      <div class="callout">
+        <div><h3>The dataset is not redistributed</h3><p>It is public and governed by its
+          own terms. Download it, place the CSV, and the loader reproduces the stratified
+          split from seed 42. A bundled synthetic generator covers tests and smoke runs.</p></div>
+        <a href="#extend">See the extension points ↓</a>
+      </div>
+    </section>
+
+    <section class="section extend" id="extend">
+      <div class="section-heading">
+        <span>07 · Extend</span>
+        <h2>Add a piece without touching the evaluator.</h2>
+        <p>The open/closed design has a runtime proof: a test registers a fake predictor
+          and the evaluator handles it with no code change.</p>
+      </div>
+      <div class="extend-table">
+        <div class="et-row et-head"><span>Add</span><span>Where</span><span>How</span></div>
+        <div class="et-row"><span>A model</span><span><code>models/</code></span><span>Implement <code>Predictor</code>, decorate <code>@register("name")</code></span></div>
+        <div class="et-row"><span>A confidence method</span><span><code>confidence/</code></span><span>Subclass <code>ConfidenceEstimator</code>, wire into the builder</span></div>
+        <div class="et-row"><span>An abstention policy</span><span><code>abstention/</code></span><span>Subclass <code>AbstentionPolicy</code>, add to the policy set</span></div>
+        <div class="et-row"><span>A dataset</span><span><code>data/loaders.py</code></span><span>Implement <code>DatasetLoader.load()</code>, add a loader branch</span></div>
+        <div class="et-row"><span>An LLM client</span><span><code>llm/</code></span><span>Implement <code>LLMClient.generate()</code>, add a client branch</span></div>
+      </div>
+    </section>
+
+    <section class="section limitations" id="limitations">
+      <div class="section-heading">
+        <span>08 · Limitations</span>
+        <h2>What this does not claim.</h2>
+      </div>
+      <div class="limitations-list">
+        <div><b>One corpus</b><p>Results are measured on a single public dataset; they do not establish general performance across ticket queues.</p></div>
+        <div><b>Illustrative costs</b><p>The (0, 1, 5) model is a stand-in. Real deployments require organization-specific cost tuning; the grid sweep shows sensitivity.</p></div>
+        <div><b>No deployment</b><p>This is an offline evaluation framework, not a live service or human user study.</p></div>
+        <div><b>Model drift</b><p>LLM numbers depend on model version and prompt wording; fixed names do not freeze a hosted service.</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div><b>RouteGuard</b><span>Cost-aware abstention for text classification · MIT-licensed evaluation framework</span></div>
+    <div><a href="#overview">Top ↑</a><a href="https://github.com/sachinkg12/RouteGuard">GitHub ↗</a></div>
+  </footer>
+</body>
+</html>
