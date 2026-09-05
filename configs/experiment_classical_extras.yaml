@@ -1,0 +1,74 @@
+# Additional classical baselines beyond TF-IDF + LR.
+#
+# Runs:
+#   - tfidf_logreg (primary, same hyper-params as the headline run)
+#   - tfidf_svm  (LinearSVC + CalibratedClassifierCV for probabilities)
+#   - tfidf_random_forest (RF, 300 trees)
+#
+# No LLM calls. ~5-10 minutes on the real dataset (RF dominates wall time).
+#
+# Reproduce:
+#   .venv/bin/python scripts/run_classification.py \
+#       --config configs/experiment_classical_extras.yaml \
+#       --run-id paper_classical_extras
+run_id: paper_classical_extras
+output_dir: outputs
+
+dataset:
+  dataset_name: it_service_ticket_classification
+  dataset_path: data/it_service_tickets.csv
+  text_column: Document
+  label_column: Topic_group
+  minimum_class_count: 10
+  max_test_samples_for_llm: 1000
+  random_seed: 42
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 100000
+  ngram_max: 2
+  C: 1.0
+
+extra_predictors:
+  - kind: tfidf_svm
+    name: tfidf_svm
+    params:
+      max_features: 100000
+      ngram_max: 2
+      C: 1.0
+      calibration_cv: 3
+  - kind: tfidf_random_forest
+    name: tfidf_random_forest
+    params:
+      max_features: 50000
+      ngram_max: 2
+      n_estimators: 300
+      n_jobs: -1
+
+llm_experiments: []
+
+confidence:
+  methods: [model_reported]
+
+abstention:
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [2.0, 5.0, 10.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: true
+  samples: 1000
+  seed: 1337
+
+prompt_template_version: v1

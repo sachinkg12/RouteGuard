@@ -1,0 +1,59 @@
+# Headline experiment.
+#
+# Primary dataset: IT Service Ticket Classification Dataset (47,837 rows).
+#   - text column   : "Document"
+#   - label column  : "Topic_group"
+#
+# How to set up (one-time):
+#   1. Download `all_tickets.csv` (or whichever filename the source ships with)
+#      from the public IT Service Ticket Classification Dataset.
+#   2. Place it at: data/it_service_tickets.csv
+#   3. Adjust `dataset_path` below if you keep it elsewhere.
+#
+# This config runs classical TF-IDF + Logistic Regression as the main baseline
+# without paid APIs. To activate real LLM runs, see experiment_llm_sample.yaml.
+run_id: default_real
+output_dir: outputs
+
+dataset:
+  dataset_name: it_service_ticket_classification
+  dataset_path: data/it_service_tickets.csv
+  text_column: Document
+  label_column: Topic_group
+  minimum_class_count: 10
+  max_test_samples_for_llm: 1000
+  random_seed: 42
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 100000
+  ngram_max: 2
+  C: 1.0
+
+llm_experiments: []  # add entries (see experiment_llm_sample.yaml) to enable LLMs.
+
+confidence:
+  methods: [model_reported]
+
+abstention:
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [2.0, 5.0, 10.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: true
+  samples: 1000
+  seed: 1337
+
+prompt_template_version: v1

@@ -1,0 +1,37 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# environments
+.env
+.venv/
+.venv-arm64/
+venv/
+env/
+
+# IDEs / tooling
+.idea/
+.vscode/
+.claude/
+
+# experiment outputs
+outputs/
+!outputs/.gitkeep
+
+# local training checkpoints / scratch
+.distilbert_smoke/
+.distilbert_train/
+.distilbert_train_calib/
+.paper_review/
+
+# data
+data/
+*.parquet
+
+# OS
+.DS_Store

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ticket_routing"
+version = "0.1.0"
+description = "Cost-aware abstention for LLM-based IT ticket classification (research codebase)"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Sachin Gupta", email = "sachinkg12@gmail.com" }]
+
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+    "pyyaml>=6.0",
+    "pydantic>=2.5",
+    "tabulate>=0.9",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+llm-openai = ["openai>=1.30"]
+llm-anthropic = ["anthropic>=0.40"]
+llm-local = ["transformers>=4.40", "torch>=2.2"]
+test = ["pytest>=8.0", "pytest-cov>=4.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"

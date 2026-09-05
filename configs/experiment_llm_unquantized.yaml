@@ -1,0 +1,125 @@
+# Unquantized (full-precision BF16) re-run of the two OPEN models, to answer
+# the quantization confound: Together served Qwen as FP8 (-Turbo) and Llama as
+# INT4 (-Lite). Here we run the SAME base models at full precision via DeepInfra.
+#
+# Everything else is identical to experiment_llm_paper.yaml: same dataset, same
+# stratified 70/10/20 split (seed 42), same 1000-ticket subsample, same prompts
+# (template v1), temperature 0, max_tokens 64, same k-shot. Only weight precision
+# differs -> any accuracy/ECE change is attributable purely to quantization.
+#
+# Requires DEEPINFRA_API_KEY in .env. GPT-4o-mini and Anthropic Haiku are NOT re-run
+# (they are vendor-hosted and unchanged) to avoid re-spending.
+run_id: unquantized_qwen_llama
+output_dir: outputs
+
+dataset:
+  dataset_name: it_service_ticket_classification
+  dataset_path: data/it_service_tickets.csv
+  text_column: Document
+  label_column: Topic_group
+  minimum_class_count: 10
+  max_test_samples_for_llm: 1000     # SAME 1000-ticket subsample, seed 42
+  random_seed: 42
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 100000
+  ngram_max: 2
+  C: 1.0
+
+llm_experiments:
+  # ----- Qwen 2.5 7B Instruct, FULL PRECISION via DeepInfra --------------
+  - name: qwen_full_zero_shot
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: Qwen/Qwen2.5-7B-Instruct
+      base_url: https://api.deepinfra.com/v1/openai
+      api_key_env: DEEPINFRA_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00005
+      cost_per_1k_output_tokens: 0.00005
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+  - name: qwen_full_few_shot_k3
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: Qwen/Qwen2.5-7B-Instruct
+      base_url: https://api.deepinfra.com/v1/openai
+      api_key_env: DEEPINFRA_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00005
+      cost_per_1k_output_tokens: 0.00005
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+  # ----- Llama 3 8B Instruct, FULL PRECISION via DeepInfra ---------------
+  - name: llama_full_zero_shot
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct
+      base_url: https://api.deepinfra.com/v1/openai
+      api_key_env: DEEPINFRA_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00003
+      cost_per_1k_output_tokens: 0.00006
+  - name: llama_full_few_shot_k3
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct
+      base_url: https://api.deepinfra.com/v1/openai
+      api_key_env: DEEPINFRA_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00003
+      cost_per_1k_output_tokens: 0.00006
+
+confidence:
+  methods: [model_reported]
+
+abstention:
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [2.0, 5.0, 10.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: true
+  samples: 1000
+  seed: 1337
+
+prompt_template_version: v1

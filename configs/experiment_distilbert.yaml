@@ -1,0 +1,77 @@
+# Fine-tuned LM baseline.
+#
+# Trains DistilBERT (distilbert-base-uncased) on the train split and evaluates
+# on the FULL test set, alongside the TF-IDF + LR baseline.
+#
+# Requires:
+#   pip install -e .[llm-local]   # brings in transformers + torch
+#
+# Wall time estimates (2 epochs, 33,486 training tickets, max_seq_length=256):
+#   - Apple Silicon (mps)        : ~30-60 min
+#   - NVIDIA RTX 3090 / A10 (fp16): ~5-10 min
+#   - CPU                        : ~3-6 hours (not recommended)
+#
+# Reproduce:
+#   .venv/bin/python scripts/run_classification.py \
+#       --config configs/experiment_distilbert.yaml \
+#       --run-id paper_distilbert
+run_id: paper_distilbert
+output_dir: outputs
+
+dataset:
+  dataset_name: it_service_ticket_classification
+  dataset_path: data/it_service_tickets.csv
+  text_column: Document
+  label_column: Topic_group
+  minimum_class_count: 10
+  max_test_samples_for_llm: 1000
+  random_seed: 42
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 100000
+  ngram_max: 2
+  C: 1.0
+
+extra_predictors:
+  - kind: distilbert
+    name: distilbert_finetuned
+    params:
+      model_name: distilbert-base-uncased
+      num_train_epochs: 2
+      per_device_train_batch_size: 32
+      per_device_eval_batch_size: 64
+      learning_rate: 5.0e-5
+      weight_decay: 0.01
+      max_seq_length: 256
+      warmup_ratio: 0.06
+      fp16: false      # set true on NVIDIA GPU with fp16 support
+      output_dir: .distilbert_train
+
+llm_experiments: []
+
+confidence:
+  methods: [model_reported]
+
+abstention:
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [2.0, 5.0, 10.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: true
+  samples: 1000
+  seed: 1337
+
+prompt_template_version: v1

@@ -1,0 +1,65 @@
+# Debug variant of experiment_small_debug.yaml that exercises the isotonic
+# calibration pipeline (calibration-split pre-fit + test-time recalibration).
+# Mock LLMs only — no API calls. Smoke test for #2.
+run_id: debug_synth_isotonic
+output_dir: outputs
+
+dataset:
+  dataset_name: synthetic
+  text_column: text
+  label_column: label
+  minimum_class_count: 5
+  max_test_samples_for_llm: 100
+  max_calib_samples_for_llm: 50
+  random_seed: 42
+  synthetic_n_per_class: 40
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 20000
+  ngram_max: 2
+  C: 1.0
+
+llm_experiments:
+  - name: mock_zero_shot
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    client:
+      kind: mock
+      model: mock-classifier
+  - name: mock_few_shot_k3
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    client:
+      kind: mock
+      model: mock-classifier
+
+confidence:
+  methods: [model_reported, agreement, isotonic]
+
+abstention:
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [2.0, 5.0, 10.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: true
+  samples: 200
+  seed: 1337
+
+prompt_template_version: v1

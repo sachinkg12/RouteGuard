@@ -1,0 +1,183 @@
+# Headline LLM experiment.
+#
+# Runs four LLMs against the IT Service Ticket Classification Dataset using
+# their NATIVE providers:
+#   - GPT-4o-mini  -> OpenAI            (api_key_env: OPENAI_API_KEY)
+#   - Anthropic Haiku -> Anthropic         (api_key_env: ANTHROPIC_API_KEY)
+#   - Qwen 2.5 7B  -> Together.ai       (api_key_env: TOGETHER_API_KEY)
+#   - Llama 3 8B   -> Together.ai       (api_key_env: TOGETHER_API_KEY)
+#
+# Each LLM runs in both zero-shot and few-shot mode -> 8 LLM variants +
+# the classical TF-IDF baseline = 9 rows across Tables 2-6.
+#
+# Model IDs follow each provider's naming; edit if you want different checkpoints.
+run_id: paper_llm_4way
+output_dir: outputs
+
+dataset:
+  dataset_name: it_service_ticket_classification
+  dataset_path: data/it_service_tickets.csv
+  text_column: Document
+  label_column: Topic_group
+  minimum_class_count: 10
+  max_test_samples_for_llm: 1000     # 1000 tickets * 8 LLM variants = 8k API calls
+  random_seed: 42
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 100000
+  ngram_max: 2
+  C: 1.0
+
+llm_experiments:
+  # ----- GPT-4o-mini via OpenAI direct -----------------------------------
+  - name: gpt4o_mini_zero_shot
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: gpt-4o-mini
+      base_url: null
+      api_key_env: OPENAI_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00015
+      cost_per_1k_output_tokens: 0.0006
+  - name: gpt4o_mini_few_shot_k3
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: gpt-4o-mini
+      base_url: null
+      api_key_env: OPENAI_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00015
+      cost_per_1k_output_tokens: 0.0006
+
+  # ----- Anthropic Haiku via Anthropic direct -------------------------------
+  - name: haiku_zero_shot
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    client:
+      kind: anthropic
+      model: claude-haiku-4-5-20251001
+      api_key_env: ANTHROPIC_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.001
+      cost_per_1k_output_tokens: 0.005
+  - name: haiku_few_shot_k3
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    client:
+      kind: anthropic
+      model: claude-haiku-4-5-20251001
+      api_key_env: ANTHROPIC_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.001
+      cost_per_1k_output_tokens: 0.005
+
+  # ----- Qwen 2.5 7B via Together ---------------------------------------
+  - name: qwen_zero_shot
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: Qwen/Qwen2.5-7B-Instruct-Turbo
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.0003
+      cost_per_1k_output_tokens: 0.0003
+  - name: qwen_few_shot_k3
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: Qwen/Qwen2.5-7B-Instruct-Turbo
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.0003
+      cost_per_1k_output_tokens: 0.0003
+
+  # ----- Llama 3 8B Instruct (Lite) via Together ------------------------
+  - name: llama_zero_shot
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct-Lite
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00006
+      cost_per_1k_output_tokens: 0.00006
+  - name: llama_few_shot_k3
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct-Lite
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00006
+      cost_per_1k_output_tokens: 0.00006
+
+confidence:
+  methods: [model_reported, agreement]
+
+abstention:
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [2.0, 5.0, 10.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: true
+  samples: 1000
+  seed: 1337
+
+prompt_template_version: v1

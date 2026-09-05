@@ -1,0 +1,119 @@
+# Ablation: does the "JSON-only, no preamble" prompt + 128 max_tokens
+# recover Llama-3-8B-Instruct-Lite's accuracy and parse_error_rate?
+#
+# Four Llama variants on a 200-ticket stratified test subsample (same seed=42
+# as the headline run, so the first 200 of that 1000-ticket sample). Classical
+# baseline included for sanity.
+run_id: ablation_llama_format
+output_dir: outputs
+
+dataset:
+  dataset_name: it_service_ticket_classification
+  dataset_path: data/it_service_tickets.csv
+  text_column: Document
+  label_column: Topic_group
+  minimum_class_count: 10
+  max_test_samples_for_llm: 200
+  random_seed: 42
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 100000
+  ngram_max: 2
+  C: 1.0
+
+llm_experiments:
+  # ----- Llama BASELINE: original v1 prompt + max_tokens=64 (broken variant) ---
+  - name: llama_zero_v1_64
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    prompt_template_version: v1
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct-Lite
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00006
+      cost_per_1k_output_tokens: 0.00006
+  - name: llama_few_shot_v1_64
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    prompt_template_version: v1
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct-Lite
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 64
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00006
+      cost_per_1k_output_tokens: 0.00006
+
+  # ----- Llama FIXED: stricter v2 prompt + max_tokens=128 -----------------
+  - name: llama_zero_v2_128
+    enabled: true
+    setting: zero_shot
+    k_shot_per_class: 0
+    self_consistency_samples: 1
+    prompt_template_version: v2
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct-Lite
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 128
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00006
+      cost_per_1k_output_tokens: 0.00006
+  - name: llama_few_shot_v2_128
+    enabled: true
+    setting: few_shot
+    k_shot_per_class: 3
+    self_consistency_samples: 1
+    prompt_template_version: v2
+    client:
+      kind: openai_compatible
+      model: meta-llama/Meta-Llama-3-8B-Instruct-Lite
+      base_url: https://api.together.xyz/v1
+      api_key_env: TOGETHER_API_KEY
+      temperature: 0.0
+      max_tokens: 128
+      request_timeout_s: 30
+      cost_per_1k_input_tokens: 0.00006
+      cost_per_1k_output_tokens: 0.00006
+
+confidence:
+  methods: [model_reported]
+
+abstention:
+  thresholds: [0.50, 0.70, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [5.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: false
+  samples: 200
+  seed: 1337
+
+# Top-level default; the per-experiment overrides above take precedence.
+prompt_template_version: v1

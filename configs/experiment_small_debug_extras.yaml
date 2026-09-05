@@ -1,0 +1,64 @@
+# Debug variant of experiment_small_debug.yaml that also runs the extra
+# classical predictors (SVM, Random Forest). Used only to smoke-test the
+# extra_predictors: wiring on synthetic data.
+run_id: debug_synth_extras
+output_dir: outputs
+
+dataset:
+  dataset_name: synthetic
+  text_column: text
+  label_column: label
+  minimum_class_count: 5
+  max_test_samples_for_llm: 100
+  random_seed: 42
+  synthetic_n_per_class: 40
+
+split:
+  train_fraction: 0.70
+  calibration_fraction: 0.10
+  test_fraction: 0.20
+
+classical:
+  enabled: true
+  name: tfidf_logreg
+  max_features: 20000
+  ngram_max: 2
+  C: 1.0
+
+extra_predictors:
+  - kind: tfidf_svm
+    name: tfidf_svm
+    params:
+      max_features: 20000
+      ngram_max: 2
+      C: 1.0
+      calibration_cv: 2
+  - kind: tfidf_random_forest
+    name: tfidf_random_forest
+    params:
+      max_features: 10000
+      ngram_max: 1
+      n_estimators: 50
+      n_jobs: 1
+
+llm_experiments: []
+
+confidence:
+  methods: [model_reported]
+
+abstention:
+  thresholds: [0.50, 0.60, 0.70, 0.80, 0.90]
+  agreement_min: 2
+
+cost:
+  correct_auto_route: 0.0
+  human_triage: 1.0
+  wrong_auto_route_options: [2.0, 5.0, 10.0]
+  default_wrong_auto_route: 5.0
+
+bootstrap:
+  enabled: true
+  samples: 200
+  seed: 1337
+
+prompt_template_version: v1
