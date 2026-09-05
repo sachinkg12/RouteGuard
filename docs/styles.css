@@ -251,6 +251,7 @@ footer { display: flex; justify-content: space-between; gap: 30px; padding: 40px
 footer div:first-child { display: flex; flex-direction: column; }
 footer b { font-weight: 800; }
 footer span { color: var(--muted); font-size: 12.5px; }
+footer .foot-cite { margin-top: 4px; color: var(--faint); font-size: 11.5px; }
 footer div:last-child { display: flex; gap: 22px; font-size: 14px; align-items: center; }
 footer a { text-decoration: none; font-weight: 600; }
 footer a:hover { color: var(--teal); }

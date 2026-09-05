@@ -192,7 +192,25 @@ outputs/       # run dirs (gitignored)
 - **Reproducibility.** Every run snapshots its config, seeds, dataset hash, and package versions.
 - **Scope.** An evaluation framework, not a production service — no serving layer, dashboards, or DB.
 
+## Citation
+
+This is the companion code for:
+
+> Sachin Gupta. *Cost-Aware Abstention for LLM-Based IT Ticket Classification.*
+> IEEE International Conference on Tools with Artificial Intelligence (ICTAI), 2026. To appear.
+
+```bibtex
+@inproceedings{gupta2026costaware,
+  author    = {Sachin Gupta},
+  title     = {Cost-Aware Abstention for {LLM}-Based {IT} Ticket Classification},
+  booktitle = {Proceedings of the IEEE International Conference on Tools with
+               Artificial Intelligence (ICTAI)},
+  year      = {2026},
+  note      = {To appear}
+}
+```
+
 ## License
 
-Code under MIT. See `LICENSE` if present; the evaluation dataset is governed by its
-own upstream terms and is not redistributed here.
+Code under MIT (see `LICENSE`). The evaluation dataset is governed by its own
+upstream terms and is not redistributed here.
