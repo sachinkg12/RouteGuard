@@ -29,8 +29,8 @@ outputs/
 .distilbert_train_calib/
 .paper_review/
 
-# data
-data/
+# data (dataset lives at repo-root data/ only; not the src data module)
+/data/
 *.parquet
 
 # OS
