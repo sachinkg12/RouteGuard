@@ -23,11 +23,15 @@ env/
 outputs/
 !outputs/.gitkeep
 
+# frozen paper evidence is distributed through the DOI archive, not Git
+/artifacts/
+
 # local training checkpoints / scratch
 .distilbert_smoke/
 .distilbert_train/
 .distilbert_train_calib/
 .paper_review/
+.superdesign/
 
 # data (dataset lives at repo-root data/ only; not the src data module)
 /data/

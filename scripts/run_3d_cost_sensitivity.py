@@ -13,6 +13,9 @@ Usage:
         --wrong-auto 2 5 10 20
 
 A new CSV lands at <run-dir>/paper_bundle/tables/extra_cost_3d_sweep.csv.
+It contains descriptive test-set policy rows only. It intentionally does not
+select or label a deployable policy; operating-point selection requires a
+separate calibration split.
 """
 from __future__ import annotations
 
@@ -138,15 +141,10 @@ def main() -> None:
         df = pd.DataFrame(rows)
         df.to_csv(out_path, index=False)
         logger.info("Wrote %s (%d rows).", out_path, len(rows))
-        # Compact summary: best policy per (predictor, ht, wa) combination.
-        idx = df.groupby(["predictor_name", "setting", "human_triage", "wrong_auto_route"])[
-            "expected_cost_per_ticket"
-        ].idxmin()
-        best = df.loc[idx, ["predictor_name", "setting", "human_triage", "wrong_auto_route",
-                            "policy", "expected_cost_per_ticket", "coverage"]]
-        summary_path = out_path.with_name("extra_cost_3d_summary.csv")
-        best.to_csv(summary_path, index=False)
-        logger.info("Wrote %s (%d best-policy rows).", summary_path, len(best))
+        logger.info(
+            "No policy summary selected: these are test-set sensitivity rows, not "
+            "calibration-selected deployment policies."
+        )
     else:
         logger.warning("No rows produced — empty raw dir?")
 

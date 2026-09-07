@@ -115,3 +115,53 @@ def bootstrap_difference(
         "n_bootstrap": n_samples,
         "seed": seed,
     }
+
+
+def bootstrap_relative_reduction(
+    policy_costs: Sequence[float],
+    baseline_costs: Sequence[float],
+    n_samples: int = 1000,
+    seed: int = 1337,
+) -> Dict:
+    """Paired-bootstrap CI for ``1 - mean(policy) / mean(baseline)``.
+
+    The ratio is recomputed inside every resample.  This matches a reported
+    relative-cost-reduction estimand; it is not an absolute-difference interval
+    divided by the full-sample baseline after bootstrapping.
+    """
+
+    if len(policy_costs) != len(baseline_costs):
+        raise ValueError("paired bootstrap requires equal-length arrays")
+    if len(policy_costs) == 0:
+        raise ValueError("paired bootstrap requires at least one observation")
+
+    rng = np.random.default_rng(seed)
+    policy = np.asarray(policy_costs, dtype=float)
+    baseline = np.asarray(baseline_costs, dtype=float)
+    baseline_mean = float(baseline.mean())
+    if baseline_mean == 0.0:
+        raise ValueError("relative reduction is undefined for a zero-cost baseline")
+
+    reductions = np.empty(n_samples)
+    n = len(policy)
+    for i in range(n_samples):
+        idx = rng.integers(0, n, size=n)
+        sampled_baseline = float(baseline[idx].mean())
+        reductions[i] = (
+            np.nan
+            if sampled_baseline == 0.0
+            else 1.0 - float(policy[idx].mean()) / sampled_baseline
+        )
+    finite = reductions[np.isfinite(reductions)]
+    if finite.size == 0:
+        raise ValueError("all bootstrap resamples had a zero-cost baseline")
+
+    return {
+        "estimand": "relative_cost_reduction",
+        "point_estimate": float(1.0 - policy.mean() / baseline_mean),
+        "ci_low": float(np.quantile(finite, 0.025)),
+        "ci_high": float(np.quantile(finite, 0.975)),
+        "n_bootstrap": int(n_samples),
+        "n_finite_bootstrap": int(finite.size),
+        "seed": int(seed),
+    }

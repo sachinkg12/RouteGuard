@@ -41,7 +41,11 @@ from ticket_routing.data.splitters import (
     stratified_three_way_split,
 )
 from ticket_routing.evaluation.evaluator import Evaluator
-from ticket_routing.evaluation.metrics import bootstrap_difference
+from ticket_routing.evaluation.metrics import (
+    bootstrap_difference,
+    bootstrap_relative_reduction,
+)
+from ticket_routing.evaluation.selection import select_threshold_on_calibration
 from ticket_routing.evaluation.cost import per_ticket_costs, CostModel
 from ticket_routing.abstention.always_route import AlwaysRoutePolicy
 from ticket_routing.llm.base import build_client_from_config
@@ -171,27 +175,49 @@ def main() -> None:
             "labels": eval_labels,
         }
 
-    # 4b. Optionally pre-fit isotonic calibrators on the calibration split.
-    prefit_isotonic: dict[str, IsotonicConfidence] = {}
-    if "isotonic" in {m.lower() for m in cfg.confidence.methods}:
-        llm_calib_texts, llm_calib_labels = stratified_test_subsample_for_llm(
+    # 4b. Build calibration predictions for EVERY confidence method. These are
+    # used both to fit calibration maps and to select operating thresholds.
+    # If LLMs are present, all predictors use the same stratified calibration
+    # subset so agreement scores are index-aligned.
+    llm_names = [n for n, _, p in predictors if isinstance(p, LLMPromptClassifier)]
+    if llm_names:
+        aligned_calib_texts, aligned_calib_labels = stratified_test_subsample_for_llm(
             split.calib_texts,
             split.calib_labels,
             max_total=cfg.dataset.max_calib_samples_for_llm,
             seed=cfg.dataset.random_seed,
         )
+    else:
+        aligned_calib_texts, aligned_calib_labels = split.calib_texts, split.calib_labels
+
+    calibration_batches: dict[str, dict] = {}
+    for name, setting, predictor in predictors:
+        logger.info(
+            "Predicting with %s/%s on %d calibration tickets for policy selection.",
+            name,
+            setting,
+            len(aligned_calib_texts),
+        )
+        calibration_batches[name] = {
+            "batch": predictor.predict(aligned_calib_texts),
+            "labels": aligned_calib_labels,
+            "texts": aligned_calib_texts,
+        }
+
+    # Optionally pre-fit isotonic calibrators on those same calibration outputs.
+    prefit_isotonic: dict[str, IsotonicConfidence] = {}
+    if "isotonic" in {m.lower() for m in cfg.confidence.methods}:
         for name, setting, predictor in predictors:
-            is_llm = isinstance(predictor, LLMPromptClassifier)
-            calib_texts = llm_calib_texts if is_llm else split.calib_texts
-            calib_labels = llm_calib_labels if is_llm else split.calib_labels
+            calib_info = calibration_batches[name]
+            calib_batch = calib_info["batch"]
+            calib_labels = calib_info["labels"]
             logger.info(
                 "Fitting isotonic calibrator for %s/%s on %d calibration tickets.",
                 name,
                 setting,
-                len(calib_texts),
+                len(calib_labels),
             )
-            calib_batch = predictor.predict(calib_texts)
-            raw_conf = calib_batch.confidence_scores or [0.0] * len(calib_texts)
+            raw_conf = calib_batch.confidence_scores or [0.0] * len(calib_labels)
             correctness = [
                 int(p == t) for p, t in zip(calib_batch.predicted_labels, calib_labels)
             ]
@@ -214,11 +240,11 @@ def main() -> None:
         correct_auto_cost=cfg.cost.correct_auto_route,
         thresholds=cfg.abstention.thresholds,
         agreement_min=cfg.abstention.agreement_min,
+        include_agreement_policies=cfg.abstention.include_agreement_policies,
     )
 
     # For agreement confidence we need predictor sets aligned on the same examples.
     # We align on `llm_test_texts` if any LLM predictor exists; otherwise on full test.
-    llm_names = [n for n, _, p in predictors if isinstance(p, LLMPromptClassifier)]
     if llm_names:
         # Re-run any non-LLM (classical) predictor on the LLM test subset so all
         # PredictionBatches are aligned for agreement-based confidence/policy.
@@ -257,6 +283,13 @@ def main() -> None:
             for other in primary_order
             if other != name
         ]
+        calibration_primary = calibration_batches[name]["batch"]
+        calibration_labels = calibration_batches[name]["labels"]
+        calibration_auxiliary = [
+            calibration_batches[other]["batch"]
+            for other in primary_order
+            if other != name
+        ]
 
         for method in cfg.confidence.methods:
             estimator = _build_confidence(
@@ -264,6 +297,26 @@ def main() -> None:
                 predictor,
                 prefit_isotonic=prefit_isotonic.get(name),
             )
+            calibration_confidences = estimator.score(
+                calibration_primary,
+                calibration_auxiliary or None,
+            )
+            selections_by_wrong_cost = {}
+            for wrong_cost in cfg.cost.wrong_auto_route_options:
+                selection = select_threshold_on_calibration(
+                    batch=calibration_primary,
+                    true_labels=calibration_labels,
+                    confidences=calibration_confidences,
+                    thresholds=cfg.abstention.thresholds,
+                    cost=CostModel(
+                        correct_auto_route=cfg.cost.correct_auto_route,
+                        human_triage=cfg.cost.human_triage,
+                        wrong_auto_route=wrong_cost,
+                    ),
+                    selection_split="calibration",
+                )
+                selections_by_wrong_cost[str(float(wrong_cost))] = selection.to_metadata()
+
             result = evaluator.evaluate(
                 predictor_name=name,
                 setting=setting,
@@ -274,6 +327,14 @@ def main() -> None:
                 confidence_estimator=estimator,
                 auxiliary_batches=auxiliary or None,
             )
+            result.metadata["policy_selection_by_wrong_cost"] = selections_by_wrong_cost
+            default_key = str(float(cfg.cost.default_wrong_auto_route))
+            if default_key not in selections_by_wrong_cost:
+                raise ValueError(
+                    "default_wrong_auto_route must appear in wrong_auto_route_options "
+                    "so the reported operating point has calibration provenance"
+                )
+            result.metadata["policy_selection"] = selections_by_wrong_cost[default_key]
             results.append(result)
             logger.info(
                 "Evaluated %s/%s with confidence=%s: acc=%.4f macro_F1=%.4f ECE=%.4f",
@@ -325,35 +386,69 @@ def _build_confidence(
 
 
 def _attach_bootstrap_cis(results, cfg) -> None:
-    """Attach a paired bootstrap CI for best-threshold vs always-route per result."""
+    """Attach test CIs to the threshold frozen on calibration.
+
+    This function deliberately contains no minimization. Selection provenance
+    must already be present in ``result.metadata``.
+    """
     cost = CostModel(
         correct_auto_route=cfg.cost.correct_auto_route,
         human_triage=cfg.cost.human_triage,
         wrong_auto_route=cfg.cost.default_wrong_auto_route,
     )
     for r in results:
-        # Find best threshold policy by expected cost reduction.
-        threshold_rows = [c for c in r.cost if c["policy"].startswith("threshold@") and c["wrong_auto_route_cost"] == cost.wrong_auto_route]
-        if not threshold_rows:
+        selection = (r.metadata or {}).get("policy_selection")
+        if not isinstance(selection, dict) or selection.get("selection_split") != "calibration":
             continue
-        best = min(threshold_rows, key=lambda c: c["expected_cost_per_ticket"])
+        selected_policy = selection.get("policy")
+        selected = next(
+            (
+                row
+                for row in r.cost
+                if row["policy"] == selected_policy
+                and row["wrong_auto_route_cost"] == cost.wrong_auto_route
+            ),
+            None,
+        )
         baseline = next(
             (c for c in r.cost if c["policy"] == "always_route" and c["wrong_auto_route_cost"] == cost.wrong_auto_route),
             None,
         )
-        if not baseline:
+        if not selected or not baseline:
             continue
-        ci = bootstrap_difference(
-            best["per_ticket_costs"],
+        absolute_ci = bootstrap_difference(
+            selected["per_ticket_costs"],
             baseline["per_ticket_costs"],
             n_samples=cfg.bootstrap.samples,
             seed=cfg.bootstrap.seed,
         )
-        # Record WHICH row this CI belongs to, so the reporting layer attaches it
-        # to exactly that (policy, wrong_route_cost) cell rather than broadcasting.
-        ci["best_policy"] = best["policy"]
-        ci["wrong_route_cost"] = cost.wrong_auto_route
-        r.metadata.setdefault("bootstrap", {})["best_threshold_vs_always_route_cost_per_ticket"] = ci
+        try:
+            relative_ci = bootstrap_relative_reduction(
+                selected["per_ticket_costs"],
+                baseline["per_ticket_costs"],
+                n_samples=cfg.bootstrap.samples,
+                seed=cfg.bootstrap.seed,
+            )
+        except ValueError as exc:
+            # A perfect always-route baseline has zero mean cost, so a relative
+            # reduction is mathematically undefined. Preserve that fact in the
+            # artifact instead of crashing or manufacturing a percentage.
+            relative_ci = {
+                "estimand": "relative_cost_reduction",
+                "point_estimate": None,
+                "ci_low": None,
+                "ci_high": None,
+                "n_bootstrap": cfg.bootstrap.samples,
+                "seed": cfg.bootstrap.seed,
+                "undefined_reason": str(exc),
+            }
+        for ci in (absolute_ci, relative_ci):
+            ci["selected_policy"] = selected["policy"]
+            ci["wrong_route_cost"] = cost.wrong_auto_route
+            ci["selection_split"] = selection["selection_split"]
+        bootstrap = r.metadata.setdefault("bootstrap", {})
+        bootstrap["selected_threshold_vs_always_route_cost_difference"] = absolute_ci
+        bootstrap["selected_threshold_vs_always_route_relative_reduction"] = relative_ci
 
 
 if __name__ == "__main__":

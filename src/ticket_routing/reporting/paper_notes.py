@@ -25,28 +25,37 @@ def _best_by(results, getter):
     return best
 
 
-def _best_policy_min_cost(results, default_wrong_cost: float = 5.0):
-    """Return (predictor_result, cost_row) with lowest expected_cost_per_ticket
-    among *threshold* policies at the default wrong-route cost (the paper's cost
-    model). Excludes the trivial always_route baseline and the non-default sweep
-    costs, so the reported headline is the cost-minimizing abstention threshold
-    under (c_ok, c_triage, c_wrong) = (0, 1, default_wrong_cost)."""
-    best = None
+def _calibration_selected_cost_rows(results, default_wrong_cost: float = 5.0):
+    """Return test rows for policies that were frozen on calibration.
+
+    This helper deliberately performs no minimization over test rows. Results
+    without explicit calibration-selection metadata are omitted from generated
+    paper notes rather than being summarized as deployment policies.
+    """
+    selected_rows = []
     for r in results:
-        for c in r.cost:
-            if not c["policy"].startswith("threshold@"):
-                continue
-            if c["wrong_auto_route_cost"] != default_wrong_cost:
-                continue
-            if best is None or c["expected_cost_per_ticket"] < best[1]["expected_cost_per_ticket"]:
-                best = (r, c)
-    return best
+        selection = (r.metadata or {}).get("policy_selection")
+        if not isinstance(selection, dict) or selection.get("selection_split") != "calibration":
+            continue
+        selected_policy = selection.get("policy")
+        row = next(
+            (
+                c
+                for c in r.cost
+                if c["policy"] == selected_policy
+                and c["wrong_auto_route_cost"] == default_wrong_cost
+            ),
+            None,
+        )
+        if row is not None:
+            selected_rows.append((r, row, selection))
+    return selected_rows
 
 
 def write_result_summary(out_dir: Path, results, env: dict) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     best_acc = _best_by(results, lambda r: r.classification["accuracy"])
-    best_cost = _best_policy_min_cost(results)
+    selected_costs = _calibration_selected_cost_rows(results)
     parse_errors = [r.classification["parse_error_rate"] for r in results]
     top_errors: List[str] = []
     if results:
@@ -69,28 +78,24 @@ def write_result_summary(out_dir: Path, results, env: dict) -> None:
     else:
         lines.append("**Q1. Which model performed best without abstention?**  No results.\n")
 
-    # Q2 / Q3: compare best threshold vs always_route on accuracy_on_auto_routed and coverage.
+    # Q2 / Q3: compare each calibration-selected threshold with always-route.
     q2_parts = []
-    for r in results:
+    for r, selected_cost, selection in selected_costs:
         ar = next((a for a in r.abstention if a["policy"] == "always_route"), None)
-        thresh = [a for a in r.abstention if a["policy"].startswith("threshold@")]
-        if ar and thresh:
-            best_t = max(
-                thresh,
-                key=lambda a: (
-                    a["accuracy_on_auto_routed"]
-                    if not np.isnan(a["accuracy_on_auto_routed"])
-                    else -1
-                ),
-            )
+        selected = next(
+            (a for a in r.abstention if a["policy"] == selected_cost["policy"]),
+            None,
+        )
+        if ar and selected:
             delta = (
-                best_t["accuracy_on_auto_routed"] - ar["accuracy_on_auto_routed"]
-                if not np.isnan(best_t["accuracy_on_auto_routed"])
+                selected["accuracy_on_auto_routed"] - ar["accuracy_on_auto_routed"]
+                if not np.isnan(selected["accuracy_on_auto_routed"])
                 else float("nan")
             )
-            coverage_loss = ar["coverage"] - best_t["coverage"]
+            coverage_loss = ar["coverage"] - selected["coverage"]
             q2_parts.append(
-                f"`{r.predictor_name}/{r.setting}`: best threshold = {best_t['policy']}, "
+                f"`{r.predictor_name}/{r.setting}`: calibration-selected policy = "
+                f"{selected['policy']}, "
                 f"acc_on_auto Δ = {delta:+.4f}, coverage Δ = {coverage_loss:+.4f}"
             )
     lines.append("**Q2. Did abstention improve accuracy on auto-routed tickets?**\n")
@@ -98,16 +103,19 @@ def write_result_summary(out_dir: Path, results, env: dict) -> None:
     lines.append("")
     lines.append("**Q3. How much coverage was lost?**  See Q2 'coverage Δ' values above.\n")
 
-    if best_cost:
-        r, c = best_cost
-        lines.append(
-            f"**Q4. Which policy minimized expected cost?**  "
-            f"`{r.predictor_name}/{r.setting}` with policy `{c['policy']}` at "
-            f"wrong-route cost {c['wrong_auto_route_cost']}: "
-            f"E[cost/ticket]={c['expected_cost_per_ticket']:.4f}, "
-            f"reduction vs always-route={c['cost_reduction_vs_always_route']:+.2%}, "
-            f"vs always-defer={c['cost_reduction_vs_always_defer']:+.2%}.\n"
-        )
+    lines.append("**Q4. How did calibration-selected policies perform on test?**\n")
+    if selected_costs:
+        for r, c, selection in selected_costs:
+            lines.append(
+                f"- `{r.predictor_name}/{r.setting}` with `{c['policy']}` "
+                f"(selected on {selection['selection_split']}): "
+                f"E[test cost/ticket]={c['expected_cost_per_ticket']:.4f}, "
+                f"reduction vs always-route={c['cost_reduction_vs_always_route']:+.2%}, "
+                f"vs always-defer={c['cost_reduction_vs_always_defer']:+.2%}."
+            )
+        lines.append("")
+    else:
+        lines.append("- No result contains calibration-selection metadata; no policy claim emitted.\n")
 
     classical = [r for r in results if r.setting == "classical"]
     llms = [r for r in results if r.setting in ("zero_shot", "few_shot")]
@@ -136,9 +144,8 @@ def write_result_summary(out_dir: Path, results, env: dict) -> None:
         )
 
     lines.append(
-        "**Q8. Strongest result for the paper:** the cost-aware deferral row showing the "
-        "largest cost reduction vs always-route (see Q4) — this directly supports the "
-        "cost-aware abstention thesis.\n"
+        "**Q8. Camera-ready claim rule:** use only the calibration-selected rows in Q4 "
+        "and the separately audited claim manifest; do not choose a headline from test rows.\n"
     )
     lines.append(
         "**Q9. Weakest / cautious wording:** any ECE row with high ECE indicates poorly calibrated "
@@ -155,12 +162,12 @@ def write_abstract_notes(out_dir: Path, results) -> None:
         best = max(results, key=lambda r: r.classification["accuracy"])
         acc = best.classification["accuracy"]
         macro = best.classification["macro_f1"]
-        cost_row = _best_policy_min_cost(results)
+        selected_costs = _calibration_selected_cost_rows(results)
         cost_phrase = (
-            f"reduces expected cost per ticket by "
-            f"{cost_row[1]['cost_reduction_vs_always_route']:+.0%} versus always-routing"
-            if cost_row
-            else "yields measurable cost reductions versus always-routing"
+            "includes calibration-selected policies evaluated once on test; use the "
+            "audited claim manifest for any numerical headline"
+            if selected_costs
+            else "does not emit a policy headline because selection provenance is absent"
         )
     else:
         acc = macro = 0.0
@@ -209,7 +216,7 @@ def write_methods_notes(out_dir: Path, cfg, dataset_meta: dict) -> None:
         f"- {', '.join(cfg.confidence.methods)}\n",
         "## Abstention policies\n",
         f"- AlwaysRoute (baseline), ThresholdAbstention at thresholds {cfg.abstention.thresholds}, "
-        f"and AgreementAbstention when >=2 predictors are configured.\n",
+        f"and AgreementAbstention only when `include_agreement_policies` is explicitly enabled.\n",
         "## Cost model\n",
         f"- correct_auto_route={cfg.cost.correct_auto_route}, "
         f"human_triage={cfg.cost.human_triage}, "
@@ -218,10 +225,10 @@ def write_methods_notes(out_dir: Path, cfg, dataset_meta: dict) -> None:
         "## Evaluation protocol\n",
         "- Stratified 70/10/20 train/calibration/test split (configurable).\n"
         "- Isotonic recalibration is fit on the calibration split and applied to the "
-        "disjoint test split; threshold policies are swept over the configured grid on test. "
-        "The bundle reports the cost-minimizing threshold; the calibration-*selected* operating "
-        "point (chosen on the calibration split, evaluated on test) is produced by "
-        "`scripts/select_threshold_on_calibration.py`.\n"
+        "disjoint test split. Candidate threshold rows are evaluated on test only after "
+        "the operating point is chosen on calibration; selection provenance is saved in "
+        "result metadata. The standalone `scripts/select_threshold_on_calibration.py` "
+        "demonstrates the same split-safe protocol.\n"
         f"- Bootstrap CIs: {'enabled' if cfg.bootstrap.enabled else 'disabled'} "
         f"({cfg.bootstrap.samples} samples, seed {cfg.bootstrap.seed}).\n",
     ]
@@ -265,7 +272,8 @@ def write_limitations_notes(out_dir: Path) -> None:
         "4. LLM results depend on model version and prompt; small wording changes can shift accuracy.\n",
         "5. LLM-reported confidence may be poorly calibrated — we report ECE for transparency.\n",
         "6. The cost model is illustrative; real cost parameters must be tuned per organization.\n",
-        "7. No fine-tuning was performed; only zero-shot, few-shot, and classical ML.\n",
+        "7. Prompted LLMs use zero-shot or few-shot inference; the trained neural "
+        "baseline is fine-tuned DistilBERT.\n",
     ]
     (out_dir / "limitations_notes.md").write_text("\n".join(md))
 
@@ -275,7 +283,8 @@ def write_reproducibility_statement(out_dir: Path, cfg, dataset_meta: dict, env:
     md = [
         "# Reproducibility statement\n",
         f"- Dataset name: `{dataset_meta.get('dataset_name', 'unknown')}`\n",
-        f"- Dataset hash (sha256): `{dataset_meta.get('dataset_hash', 'unknown')}`\n",
+        f"- Normalized loaded-row hash (sha256): "
+        f"`{dataset_meta.get('dataset_hash', 'unknown')}`\n",
         f"- Random seed: {cfg.dataset.random_seed}\n",
         f"- Split sizes: train_fraction={cfg.split.train_fraction}, "
         f"calibration_fraction={cfg.split.calibration_fraction}, "

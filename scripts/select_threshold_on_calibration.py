@@ -28,6 +28,10 @@ import numpy as np
 
 from ticket_routing.data.loaders import build_loader_from_config
 from ticket_routing.data.splitters import stratified_three_way_split
+from ticket_routing.evaluation.metrics import (
+    bootstrap_difference,
+    bootstrap_relative_reduction,
+)
 from ticket_routing.models.tfidf_logreg import TfidfLogisticRegressionPredictor
 from ticket_routing.utils.config import load_config
 
@@ -157,22 +161,18 @@ def main():
     print(f"  threshold@{tau_star:.2f}  E[cost] = {cost_at_star:.4f}")
     print(f"  relative reduction = {rel_reduction*100:.2f}%")
 
-    # Bootstrap CI (1000 paired resamples, seed 1337)
-    rng = np.random.default_rng(1337)
-    diffs = []
+    # Bootstrap CIs (1000 paired resamples, seed 1337). The relative
+    # estimand recomputes its ratio inside each paired resample.
     per_always = np.array(always_test_per)
     per_star = np.array(per_at_star)
-    n = len(per_always)
-    for _ in range(1000):
-        idx = rng.integers(0, n, size=n)
-        d = per_star[idx].mean() - per_always[idx].mean()
-        diffs.append(d)
-    lo, hi = np.percentile(diffs, [2.5, 97.5])
-    print(f"  bootstrap 95% CI on cost delta: [{lo:.4f}, {hi:.4f}]")
-    rel_lo = -hi / always_test_cost
-    rel_hi = -lo / always_test_cost
-    print(f"  bootstrap 95% CI on relative reduction: "
-          f"[{rel_lo*100:.2f}%, {rel_hi*100:.2f}%]")
+    delta = bootstrap_difference(per_star, per_always, n_samples=1000, seed=1337)
+    relative = bootstrap_relative_reduction(
+        per_star, per_always, n_samples=1000, seed=1337
+    )
+    print(f"  paired-bootstrap 95% CI on cost delta: "
+          f"[{delta['ci_low']:.4f}, {delta['ci_high']:.4f}]")
+    print(f"  paired ratio-bootstrap 95% CI on relative reduction: "
+          f"[{relative['ci_low']*100:.2f}%, {relative['ci_high']*100:.2f}%]")
 
 
 if __name__ == "__main__":

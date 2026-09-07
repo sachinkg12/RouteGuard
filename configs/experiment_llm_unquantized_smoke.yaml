@@ -1,11 +1,15 @@
-# Unquantized (full-precision BF16) re-run of the two OPEN models, to answer
-# the quantization confound: Together served Qwen as FP8 (-Turbo) and Llama as
-# INT4 (-Lite). Here we run the SAME base models at full precision via DeepInfra.
+# Alternate-provider re-run of the two open model families. The primary run used
+# Together endpoints identified as Qwen FP8 (-Turbo) and Llama INT4 (-Lite); this
+# run uses the corresponding model identifiers through DeepInfra.
+# DeepInfra documentation at experiment time described these endpoints as BF16,
+# but the saved API responses do not contain a dtype/precision field.
 #
-# Everything else is identical to experiment_llm_paper.yaml: same dataset, same
+# Dataset and query settings match experiment_llm_paper.yaml: same dataset, same
 # stratified 70/10/20 split (seed 42), same 1000-ticket subsample, same prompts
-# (template v1), temperature 0, max_tokens 64, same k-shot. Only weight precision
-# differs -> any accuracy/ECE change is attributable purely to quantization.
+# (template v1), temperature 0, max_tokens 64, and same k-shot. Provider and
+# provider-documented precision change together, and the saved run metadata do
+# not independently verify numerical precision. Treat this as a cross-provider
+# robustness check, not a controlled quantization-only ablation.
 #
 # Requires DEEPINFRA_API_KEY in .env. GPT-4o-mini and Anthropic Haiku are NOT re-run
 # (they are vendor-hosted and unchanged) to avoid re-spending.
@@ -34,7 +38,7 @@ classical:
   C: 1.0
 
 llm_experiments:
-  # ----- Qwen 2.5 7B Instruct, FULL PRECISION via DeepInfra --------------
+  # ----- Qwen 2.5 7B Instruct via DeepInfra ------------------------------
   - name: qwen_full_zero_shot
     enabled: true
     setting: zero_shot
@@ -72,7 +76,7 @@ llm_experiments:
         chat_template_kwargs:
           enable_thinking: false
 
-  # ----- Llama 3 8B Instruct, FULL PRECISION via DeepInfra ---------------
+  # ----- Llama 3 8B Instruct via DeepInfra -------------------------------
   - name: llama_full_zero_shot
     enabled: true
     setting: zero_shot

@@ -1,9 +1,9 @@
-"""Per-baseline calibration-selected threshold and test cost.
+"""Per-baseline calibration-selected threshold and held-out test cost.
 
-Refits SVM and RF on train, selects each model's tau* on calibration,
-evaluates on the held-out test split. For DistilBERT we cannot refit
-cheaply, so we evaluate at the shared substrate threshold tau=0.60
-(the classical baseline's calibration-selected value).
+The classical TF-IDF models are refit on train. DistilBERT uses frozen
+calibration/test vectors produced by ``distilbert_calibration_predict.py``.
+Every model selects its own operating point on calibration and is evaluated
+once on test. Relative-cost intervals recompute the ratio in each resample.
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import numpy as np
 
 from ticket_routing.data.loaders import build_loader_from_config
 from ticket_routing.data.splitters import stratified_three_way_split
+from ticket_routing.evaluation.metrics import bootstrap_relative_reduction
 from ticket_routing.models.tfidf_logreg import TfidfLogisticRegressionPredictor
 from ticket_routing.models.tfidf_svm import TfidfLinearSVMPredictor
 from ticket_routing.models.tfidf_rf import TfidfRandomForestPredictor
@@ -83,16 +84,7 @@ def evaluate_model(name, clf, split):
     )
     rel = (always_test - cost_star) / always_test if always_test else 0.0
 
-    # Bootstrap CI on relative reduction
-    rng = np.random.default_rng(1337)
-    diffs = []
-    n = len(always_per)
-    for _ in range(1000):
-        idx = rng.integers(0, n, size=n)
-        diffs.append(per_star[idx].mean() - always_per[idx].mean())
-    lo, hi = np.percentile(diffs, [2.5, 97.5])
-    rel_lo = (-hi / always_test) if always_test else 0.0
-    rel_hi = (-lo / always_test) if always_test else 0.0
+    interval = bootstrap_relative_reduction(per_star, always_per, n_samples=1000, seed=1337)
 
     print(f"  Calibration U-curve: " +
           " ".join(f"{t}={calib_costs[t]:.3f}" for t in thresholds))
@@ -100,48 +92,57 @@ def evaluate_model(name, clf, split):
     print(f"  always_route on test   E[cost] = {always_test:.4f}")
     print(f"  threshold@{tau_star:.2f} on test E[cost] = {cost_star:.4f}")
     print(f"  relative reduction = {rel*100:.2f}%")
-    print(f"  bootstrap CI = [{rel_lo*100:.2f}%, {rel_hi*100:.2f}%]")
+    print(f"  ratio-bootstrap CI = [{interval['ci_low']*100:.2f}%, "
+          f"{interval['ci_high']*100:.2f}%]")
     print(f"  coverage = {cov*100:.1f}%, acc on routed = {acc*100:.1f}%, "
           f"wrong-route rate = {wrong_rate*100:.2f}%")
     return {
         "name": name, "tau_star": tau_star,
         "always_cost": always_test, "tau_star_cost": cost_star,
-        "rel": rel, "rel_ci": (rel_lo, rel_hi),
+        "rel": rel, "rel_ci": (interval["ci_low"], interval["ci_high"]),
         "coverage": cov, "acc_routed": acc, "wrong_rate": wrong_rate,
     }
 
 
-def evaluate_distilbert_at_shared_tau(shared_tau, split):
-    """DistilBERT predictions are loaded from disk (no calibration available)."""
-    print(f"\n=== DistilBERT (eval at shared tau={shared_tau}, "
-          f"no separate calibration available) ===")
-    raw_path = Path("outputs/paper_distilbert__20260521_230540/paper_bundle/"
-                    "raw/distilbert_finetuned__classical__model_reported.json")
+def evaluate_distilbert_from_saved_predictions(split):
+    """Select DistilBERT's threshold on frozen calibration predictions."""
+    print("\n=== DistilBERT (frozen calibration/test predictions) ===")
+    raw_path = Path("outputs/distilbert_calib_test_preds.json")
     data = json.loads(raw_path.read_text())
+    if data["calib_labels"] != list(split.calib_labels):
+        raise ValueError("saved DistilBERT calibration labels do not match configured split")
+    if data["test_labels"] != list(split.test_labels):
+        raise ValueError("saved DistilBERT test labels do not match configured split")
+
+    thresholds = [0.5, 0.6, 0.7, 0.8, 0.9]
+    calib_costs = {
+        tau: cost_at_tau(
+            data["calib_confidences"], data["calib_predictions"],
+            data["calib_labels"], tau,
+        )[0]
+        for tau in thresholds
+    }
+    tau_star = min(calib_costs, key=calib_costs.get)
     always_test, always_per = cost_at_tau(
-        data["confidences"], data["predictions"], split.test_labels, tau=0.0,
+        data["test_confidences"], data["test_predictions"], data["test_labels"], tau=0.0,
     )
     cost_t, per_t = cost_at_tau(
-        data["confidences"], data["predictions"], split.test_labels, tau=shared_tau,
+        data["test_confidences"], data["test_predictions"], data["test_labels"], tau=tau_star,
     )
     cov, acc, wrong_rate = coverage_acc(
-        data["confidences"], data["predictions"], split.test_labels, shared_tau,
+        data["test_confidences"], data["test_predictions"], data["test_labels"], tau_star,
     )
     rel = (always_test - cost_t) / always_test
+    interval = bootstrap_relative_reduction(per_t, always_per, n_samples=1000, seed=1337)
 
-    rng = np.random.default_rng(1337)
-    diffs = []
-    n = len(always_per)
-    for _ in range(1000):
-        idx = rng.integers(0, n, size=n)
-        diffs.append(per_t[idx].mean() - always_per[idx].mean())
-    lo, hi = np.percentile(diffs, [2.5, 97.5])
-    rel_lo, rel_hi = -hi / always_test, -lo / always_test
-
+    print(f"  Calibration U-curve: " +
+          " ".join(f"{t}={calib_costs[t]:.3f}" for t in thresholds))
+    print(f"  tau* (calibration-selected) = {tau_star:.2f}")
     print(f"  always_route on test E[cost] = {always_test:.4f}")
-    print(f"  threshold@{shared_tau} on test E[cost] = {cost_t:.4f}")
+    print(f"  threshold@{tau_star:.2f} on test E[cost] = {cost_t:.4f}")
     print(f"  relative reduction = {rel*100:.2f}%")
-    print(f"  bootstrap CI = [{rel_lo*100:.2f}%, {rel_hi*100:.2f}%]")
+    print(f"  ratio-bootstrap CI = [{interval['ci_low']*100:.2f}%, "
+          f"{interval['ci_high']*100:.2f}%]")
     print(f"  coverage = {cov*100:.1f}%, acc on routed = {acc*100:.1f}%, "
           f"wrong-route rate = {wrong_rate*100:.2f}%")
 
@@ -173,7 +174,7 @@ def main():
     evaluate_model("TF-IDF + LR", lr, split)
     evaluate_model("TF-IDF + Linear SVM", svm, split)
     evaluate_model("TF-IDF + Random Forest", rf, split)
-    evaluate_distilbert_at_shared_tau(0.60, split)
+    evaluate_distilbert_from_saved_predictions(split)
 
 
 if __name__ == "__main__":

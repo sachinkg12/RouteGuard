@@ -9,6 +9,7 @@ Rules:
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Iterator, Optional, Sequence
 
@@ -38,7 +39,13 @@ def parse_label_json(text: str, allowed_labels: Sequence[str]) -> ParsedLLMOutpu
     if label not in set(allowed_labels):
         return ParsedLLMOutput(label, _coerce_confidence(payload.get("confidence")), INVALID_LABEL)
 
-    return ParsedLLMOutput(label, _coerce_confidence(payload.get("confidence")), PARSE_OK)
+    confidence = _coerce_confidence(payload.get("confidence"))
+    if confidence is None:
+        # The prompt contract requires both a label and a finite confidence.
+        # Treating a missing value as a successful prediction would later turn
+        # a one-sample vote share into a false confidence of 1.0.
+        return ParsedLLMOutput("__PARSE_ERROR__", None, PARSE_ERROR)
+    return ParsedLLMOutput(label, confidence, PARSE_OK)
 
 
 def _try_parse_json(text: str):
@@ -93,6 +100,8 @@ def _coerce_confidence(value) -> Optional[float]:
     try:
         conf = float(value)
     except (TypeError, ValueError):
+        return None
+    if not math.isfinite(conf):
         return None
     if conf < 0.0:
         return 0.0

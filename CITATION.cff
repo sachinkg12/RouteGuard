@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: >-
+  Cite the preferred conference paper when using its methods or findings, and cite
+  this software record when using the implementation. The archival paper DOI and
+  IEEE Xplore URL will be added only after publication.
+title: RouteGuard — Cost-Aware Abstention for Text Classification
+type: software
+authors:
+  - family-names: Gupta
+    given-names: Sachin
+repository-code: https://github.com/sachinkg12/RouteGuard
+url: https://sachinkg12.github.io/RouteGuard/
+version: 0.1.0
+license: MIT
+keywords:
+  - selective prediction
+  - abstention
+  - calibration
+  - IT ticket routing
+  - large language models
+preferred-citation:
+  type: conference-paper
+  authors:
+    - family-names: Gupta
+      given-names: Sachin
+  title: Cost-Aware Abstention for LLM-Based IT Ticket Classification
+  collection-title: Proceedings of the IEEE International Conference on Tools with Artificial Intelligence (ICTAI)
+  year: 2026

@@ -47,6 +47,7 @@ class IsotonicConfidence(ConfidenceEstimator):
             [float(c) if c is not None else 0.0 for c in confidences],
             dtype=float,
         )
+        x[~np.isfinite(x)] = 0.0
         y = np.asarray(correctness, dtype=float)
         if x.size == 0 or len(np.unique(y)) < 2:
             self._fitted = False
@@ -67,6 +68,7 @@ class IsotonicConfidence(ConfidenceEstimator):
         if primary.confidence_scores is None:
             return [0.0] * len(primary)
         raw = [float(c) if c is not None else 0.0 for c in primary.confidence_scores]
+        raw = [value if np.isfinite(value) else 0.0 for value in raw]
         if not self._fitted or self._model is None:
             # Fall through to raw if not fitted (e.g. degenerate calibration split).
             return raw

@@ -3,9 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="RouteGuard: cost-aware abstention for text classification. Defer uncertain items to human review when a wrong auto-decision costs more than a deferral.">
+  <meta name="description" content="RouteGuard is the companion code and evidence guide for an accepted IEEE ICTAI 2026 study of cost-aware abstention in IT ticket routing.">
+  <meta name="author" content="Sachin Gupta">
+  <meta name="citation_title" content="Cost-Aware Abstention for LLM-Based IT Ticket Classification">
+  <meta name="citation_author" content="Sachin Gupta">
+  <meta name="citation_conference_title" content="IEEE International Conference on Tools with Artificial Intelligence (ICTAI)">
+  <meta name="citation_publication_date" content="2026">
+  <meta property="og:title" content="RouteGuard · Cost-Aware Abstention">
+  <meta property="og:description" content="Companion code, scoped findings, and reproduction guidance for an accepted IEEE ICTAI 2026 paper.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://sachinkg12.github.io/RouteGuard/">
+  <link rel="canonical" href="https://sachinkg12.github.io/RouteGuard/">
   <title>RouteGuard · Cost-Aware Abstention</title>
-  <script>document.documentElement.classList.add('js');</script>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,99 +23,157 @@
   <script defer src="app.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
   <aside class="side-nav" aria-label="Project navigation">
     <a class="brand" href="#overview" aria-label="RouteGuard home">
-      <span class="mark" aria-hidden="true">R</span>
+      <img class="mark" src="assets/favicon.svg" alt="">
       <span><b>RouteGuard</b><small>Cost-Aware Abstention</small></span>
     </a>
-    <nav>
+
+    <nav class="desktop-nav" aria-label="Page sections">
       <a href="#overview"><span>01</span>Overview</a>
-      <a href="#cost"><span>02</span>The cost problem</a>
-      <a href="#pipeline"><span>03</span>How it works</a>
-      <a href="#explorer"><span>04</span>Operating point</a>
-      <a href="#results"><span>05</span>Findings</a>
-      <a href="#reproduce"><span>06</span>Reproduce</a>
-      <a href="#extend"><span>07</span>Extend</a>
-      <a href="#limitations"><span>08</span>Limitations</a>
+      <a href="#study"><span>02</span>Study at a glance</a>
+      <a href="#cost"><span>03</span>The cost problem</a>
+      <a href="#pipeline"><span>04</span>How it works</a>
+      <a href="#explorer"><span>05</span>Cost illustration</a>
+      <a href="#results"><span>06</span>Findings</a>
+      <a href="#reproduce"><span>07</span>Reproduce</a>
+      <a href="#extend"><span>08</span>Extend</a>
+      <a href="#limitations"><span>09</span>Limitations</a>
+      <a href="#publication"><span>10</span>Publication</a>
     </nav>
+
+    <details class="mobile-nav">
+      <summary>Sections</summary>
+      <nav aria-label="Mobile page sections">
+        <a href="#overview">Overview</a>
+        <a href="#study">Study at a glance</a>
+        <a href="#cost">The cost problem</a>
+        <a href="#pipeline">How it works</a>
+        <a href="#explorer">Cost illustration</a>
+        <a href="#results">Findings</a>
+        <a href="#reproduce">Reproduce</a>
+        <a href="#extend">Extend</a>
+        <a href="#limitations">Limitations</a>
+        <a href="#publication">Publication</a>
+      </nav>
+    </details>
+
     <div class="side-meta">
       <a href="https://github.com/sachinkg12/RouteGuard">GitHub source ↗</a>
-      <span>Evaluation framework</span>
+      <span>Accepted at IEEE ICTAI 2026</span>
     </div>
   </aside>
 
-  <main>
+  <main id="main-content">
     <section class="hero" id="overview">
-      <div class="eyebrow">Selective prediction for text classification</div>
+      <div class="publication-chip">
+        <span>Accepted paper</span>
+        <b>IEEE ICTAI 2026</b>
+        <small>DOI and archival IEEE Xplore link pending</small>
+      </div>
+      <div class="eyebrow">IT ticket routing with selective prediction</div>
       <h1>Know when <span>not to answer.</span></h1>
-      <p class="lede">RouteGuard measures whether a classifier should auto-decide or
-        defer an uncertain item to a human, when a wrong auto-decision costs far
-        more than a deferral. It reports calibration, coverage, and expected cost,
-        not just accuracy.</p>
+      <p class="lede">RouteGuard tests whether a classifier should auto-route an IT
+        support ticket or defer it to a human when a wrong route costs more than
+        triage. It reports accuracy, calibration, coverage, and expected cost—but
+        does not claim a new abstention algorithm.</p>
       <div class="actions">
-        <a class="button primary" href="https://github.com/sachinkg12/RouteGuard">View source</a>
-        <a class="button secondary" href="#reproduce">Reproduce it</a>
+        <a class="button primary" href="#publication">Paper status</a>
+        <a class="button secondary" href="https://github.com/sachinkg12/RouteGuard">View source</a>
+        <a class="button text-button" href="#reproduce">Reproduce the study ↓</a>
       </div>
 
       <div class="decision-strip" aria-label="Routing decision and its costs">
-        <div class="ds-node ds-in"><b>Ticket</b><span>incoming text</span></div>
+        <div class="ds-node ds-in"><b>Ticket</b><span>incoming support text</span></div>
         <i aria-hidden="true">→</i>
         <div class="ds-node ds-conf"><b>Confidence</b><span>score vs. threshold τ</span></div>
         <i aria-hidden="true">→</i>
         <div class="ds-branch" aria-hidden="true"></div>
         <div class="ds-outs">
-          <div class="ds-out out-route"><b>Auto-route</b><span>confident</span></div>
-          <div class="ds-out out-defer"><b>Defer</b><span>uncertain</span></div>
+          <div class="ds-out out-route"><b>Auto-route</b><span>confidence clears threshold</span></div>
+          <div class="ds-out out-defer"><b>Defer</b><span>send to human triage</span></div>
         </div>
       </div>
 
-      <div class="cost-legend" aria-label="Cost of each outcome">
+      <div class="cost-legend" aria-label="Illustrative cost of each outcome">
         <span class="cl-item"><i class="dot route"></i>Correct route<b>0</b></span>
         <span class="cl-item"><i class="dot defer"></i>Human triage<b>1</b></span>
         <span class="cl-item"><i class="dot wrong"></i>Wrong route<b>5</b></span>
-        <span class="cl-note">A wrong auto-route costs 5&times; a deferral. Abstention trades cheap deferrals for expensive mistakes.</span>
+        <span class="cl-note">These costs are hypothetical units for analysis, not universal deployment costs.</span>
+      </div>
+    </section>
+
+    <section class="section study" id="study">
+      <div class="section-heading">
+        <span>02 · Study at a glance</span>
+        <h2>The evidence, before the headline.</h2>
+        <p>A compact map of what was evaluated, how leakage was controlled, and
+          where the conclusions stop.</p>
+      </div>
+      <div class="study-grid">
+        <article><span>Corpus</span><strong>47,837 tickets</strong><p>Eight IT support categories from the public <a href="https://www.kaggle.com/datasets/adisongoh/it-service-ticket-classification-dataset/versions/1">IT Service Ticket Classification Dataset, version 1</a> (CC0).</p></article>
+        <article><span>Split</span><strong>70 / 10 / 20</strong><p>Stratified train, calibration, and test partitions. Few-shot examples come from training only.</p></article>
+        <article><span>Models</span><strong>4 + 8 settings</strong><p>Four trained non-LLM baselines plus eight prompted settings across four LLM families (zero- and few-shot). LLM evaluation uses a stratified 1,000-ticket test subset to bound API cost.</p></article>
+        <article><span>Protocol</span><strong>Select, then test</strong><p>Non-LLM thresholds are selected on calibration and evaluated once on test. The reported LLM policy uses a fixed cost-derived threshold, never a test-selected one.</p></article>
+      </div>
+      <div class="evidence-key" aria-label="How to interpret evidence on this page">
+        <b>How to read this page</b>
+        <span><i class="evidence measured"></i>Measured result</span>
+        <span><i class="evidence derived"></i>Derived illustration</span>
+        <span><i class="evidence assumption"></i>Illustrative assumption</span>
       </div>
     </section>
 
     <section class="section" id="cost">
       <div class="section-heading">
-        <span>02 · The cost problem</span>
+        <span>03 · The cost problem</span>
         <h2>Accuracy hides the expensive mistakes.</h2>
-        <p>Two systems with the same accuracy are not equally good if one makes its
-          errors on decisions that are costly to reverse. RouteGuard scores the
-          decision, not just the label, under an asymmetric cost model.</p>
+        <p>Two systems with similar accuracy can have different operational value
+          when wrong routes and human review have different consequences. RouteGuard
+          evaluates the route-or-defer decision under an explicit cost model.</p>
       </div>
 
-      <div class="cost-formula" aria-label="Expected cost per item">
+      <div class="cost-formula" aria-label="Expected cost per ticket">
         <div class="cf-lhs">E[cost]</div>
         <div class="cf-eq">=</div>
         <div class="cf-terms">
-          <span class="cf-term t-defer"><b>(1 − coverage)</b><small>deferred → human triage, cost 1</small></span>
+          <span class="cf-term t-defer"><b>(1 − coverage) × 1</b><small>deferred → human triage</small></span>
           <span class="cf-op">+</span>
-          <span class="cf-term t-wrong"><b>coverage × (1 − routed acc) × 5</b><small>auto-routed but wrong, cost 5</small></span>
+          <span class="cf-term t-wrong"><b>coverage × (1 − routed acc) × 5</b><small>auto-routed but wrong</small></span>
           <span class="cf-op">+</span>
-          <span class="cf-term t-route"><b>0</b><small>auto-routed and correct, cost 0</small></span>
+          <span class="cf-term t-route"><b>0</b><small>auto-routed and correct</small></span>
         </div>
       </div>
-      <p class="note">Coverage is the share of items auto-routed; the rest are deferred.
-        Raising the confidence threshold defers more, lowering wrong-route rate but
-        paying more triage. The cost model finds the balance.</p>
+      <p class="note">Coverage is the share of tickets auto-routed. Routed accuracy
+        is accuracy among only those tickets. Raising the threshold usually trades
+        coverage for fewer wrong routes.</p>
+      <details class="glossary">
+        <summary>Plain-language metric guide</summary>
+        <dl>
+          <div><dt>Abstention</dt><dd>Letting the system decline an automatic decision and ask a human.</dd></div>
+          <div><dt>Calibration</dt><dd>How closely stated confidence matches observed correctness on average.</dd></div>
+          <div><dt>ECE</dt><dd>A binned calibration summary. A lower ECE does not by itself prove that confidence ranks correct cases above incorrect ones.</dd></div>
+        </dl>
+      </details>
     </section>
 
     <section class="section pipeline" id="pipeline">
       <div class="section-heading">
-        <span>03 · How it works</span>
-        <h2>A pipeline that separates every concern.</h2>
-        <p>Prediction, confidence, abstention, and cost are independent stages. The
-          evaluator never inspects a predictor's internals, so a new model or policy
-          plugs in without touching it.</p>
+        <span>04 · How it works</span>
+        <h2>A pipeline that separates concerns.</h2>
+        <p>Prediction, confidence, abstention, and cost are separate stages. Predictor
+          implementations are registry-based and do not require evaluator changes.
+          Confidence methods, policies, datasets, and clients currently require
+          explicit builder or policy-set wiring.</p>
       </div>
 
       <div class="flow" id="flow" aria-label="RouteGuard evaluation pipeline">
         <div class="flow-step" data-step="0"><b>Predictor</b><span>label + score</span></div>
-        <div class="flow-step" data-step="1"><b>Confidence</b><span>calibrate the score</span></div>
+        <div class="flow-step" data-step="1"><b>Confidence</b><span>estimate or recalibrate</span></div>
         <div class="flow-step" data-step="2"><b>Abstention</b><span>route or defer</span></div>
-        <div class="flow-step" data-step="3"><b>Cost model</b><span>expected cost</span></div>
+        <div class="flow-step" data-step="3"><b>Cost model</b><span>explicit assumptions</span></div>
         <div class="flow-step" data-step="4"><b>Evaluator</b><span>tables + figures</span></div>
         <svg class="flow-track" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
           <line x1="0" y1="3" x2="100" y2="3"></line>
@@ -115,36 +182,36 @@
       </div>
 
       <div class="feature-grid">
-        <article><span>Predictors</span><h3>Classical &amp; LLM</h3><p>TF-IDF (LR / SVM / RF), fine-tuned DistilBERT, and prompted LLMs share one interface.</p></article>
-        <article><span>Confidence</span><h3>Calibrated scores</h3><p>Model-reported, cross-predictor agreement, or isotonic recalibration fit on a held-out split.</p></article>
-        <article><span>Abstention</span><h3>Threshold policies</h3><p>Route above a confidence threshold; defer below it. Always-route is the baseline.</p></article>
-        <article><span>Cost</span><h3>Asymmetric &amp; swept</h3><p>Configurable (c_ok, c_triage, c_wrong), evaluated across a grid so conclusions are not tied to one setting.</p></article>
+        <article><span>Predictors</span><h3>Classical &amp; LLM</h3><p>TF-IDF (LR / SVM / RF), fine-tuned DistilBERT, and prompted LLMs share one prediction interface.</p></article>
+        <article><span>Confidence</span><h3>Several signals</h3><p>Model-reported score, cross-predictor agreement, and optional held-out isotonic recalibration.</p></article>
+        <article><span>Abstention</span><h3>Threshold policies</h3><p>Route above a displayed threshold and defer below it; always-route and always-defer are reference policies.</p></article>
+        <article><span>Cost</span><h3>Explicit &amp; configurable</h3><p>The framework supports configurable cost triples. The paper reports the illustrative (0, 1, 5) setting and threshold sensitivity.</p></article>
       </div>
     </section>
 
     <section class="section explorer" id="explorer">
       <div class="section-heading">
-        <span>04 · Operating point</span>
-        <h2>Move the cost. Watch the winner change.</h2>
-        <p>These are the measured operating points of the strongest classical baseline.
-          Drag the wrong-route cost: the expected-cost curve and the cost-minimizing
-          threshold update live.</p>
+        <span>05 · Cost illustration</span>
+        <h2>Move one assumed cost. Compare shown policies.</h2>
+        <p>This interactive uses frozen test-set operating points from the headline
+          TF-IDF + Logistic Regression baseline. It is a descriptive illustration,
+          not threshold selection and not a deployment recommendation.</p>
       </div>
 
       <div class="explorer-shell">
         <div class="explorer-controls">
-          <label for="cwrong">Wrong-route cost <span class="hint">(triage fixed at 1, correct route at 0)</span></label>
+          <label for="cwrong">Wrong-route cost <span class="hint">(triage fixed at 1; correct route fixed at 0)</span></label>
           <div class="slider-row">
-            <input id="cwrong" type="range" min="2" max="20" step="1" value="5" aria-describedby="cwrong-out">
-            <output id="cwrong-out">5&times;</output>
+            <input id="cwrong" type="range" min="2" max="20" step="1" value="5" aria-describedby="cwrong-out explorer-method">
+            <output id="cwrong-out">5×</output>
           </div>
-          <div class="explorer-verdict">
+          <div class="explorer-verdict" role="status" aria-live="polite" aria-atomic="true">
             <div class="ev-block">
-              <span>Cost-minimizing policy</span>
+              <span>Lowest shown policy</span>
               <strong id="best-policy">τ = 0.60</strong>
             </div>
             <div class="ev-block">
-              <span>Expected cost</span>
+              <span>Lowest shown test cost</span>
               <strong id="best-cost">0.472</strong>
             </div>
             <div class="ev-block">
@@ -155,105 +222,157 @@
           <p class="ev-read" id="explorer-read"></p>
         </div>
         <div class="explorer-chart">
-          <div class="chart-head"><span class="detail-kind">Expected cost by policy</span></div>
-          <div id="cost-bars" class="cost-bars" role="img" aria-label="Expected cost for each threshold policy"></div>
+          <div class="chart-head"><span class="detail-kind">Expected test cost by displayed policy</span></div>
+          <div id="cost-bars" class="cost-bars" role="list" aria-label="Expected test cost for each displayed threshold policy"></div>
         </div>
       </div>
-      <p class="diagram-hint">Low wrong-route cost favors auto-routing everything; as the
-        cost of a mistake rises, deferring more (a higher threshold) wins. The evaluator
-        computes this across a full grid of cost settings.</p>
+      <p class="diagram-hint" id="explorer-method">This page changes only the
+        wrong-route cost as an explanatory aid. The paper's reported conclusions use
+        the fixed illustrative cost model (0, 1, 5); real deployment costs must be
+        estimated locally. The paper protocol selects an operating point using
+        calibration data before evaluating it once on test.</p>
     </section>
 
     <section class="section results" id="results">
       <div class="section-heading">
-        <span>05 · Findings</span>
-        <h2>What the framework measured</h2>
-        <p>On a public 47,837-ticket support dataset (8 classes, 70/10/20 split). Cost
+        <span>06 · Findings</span>
+        <h2>What was measured—and on which model</h2>
+        <p>Public 47,837-ticket corpus, eight classes. Default illustrative cost
           model (c_ok, c_triage, c_wrong) = (0, 1, 5).</p>
       </div>
       <div class="score-grid">
-        <div class="score hero-score"><strong data-count="38.1" data-suffix="%">38.1%</strong><span>lower expected cost than always-routing (best classical baseline)</span></div>
-        <div class="score"><strong data-count="0.863">0.863</strong><span>best classical accuracy (Linear SVM)</span></div>
-        <div class="score"><strong data-count="95.0" data-suffix="%">95.0%</strong><span>routed accuracy at the chosen threshold</span></div>
-        <div class="score"><strong data-count="70.5" data-suffix="%">70.5%</strong><span>coverage (share auto-routed)</span></div>
-        <div class="score"><strong data-count="3.5" data-suffix="%">3.5%</strong><span>wrong-route rate</span></div>
-        <div class="score"><strong data-count="86" data-prefix="≥" data-suffix="%">≥86%</strong><span>ECE reduction from isotonic recalibration</span></div>
+        <div class="score hero-score"><strong data-count="38.1" data-suffix="%">38.1%</strong><span>lower test cost for TF-IDF + LR at calibration-selected τ = 0.60; 95% CI 35.7–40.4%</span></div>
+        <div class="score"><strong data-count="0.477">0.477</strong><span>best prompted-LLM accuracy: Haiku few-shot on the common 1,000-ticket subset</span></div>
+        <div class="score"><strong data-count="0.877">0.877</strong><span>best non-LLM accuracy: fine-tuned DistilBERT</span></div>
+        <div class="score"><strong data-count="95.0" data-suffix="%">95.0%</strong><span>TF-IDF + LR routed accuracy at τ = 0.60</span></div>
+        <div class="score"><strong data-count="70.5" data-suffix="%">70.5%</strong><span>TF-IDF + LR coverage at τ = 0.60</span></div>
+        <div class="score"><strong data-count="3.5" data-suffix="%">3.5%</strong><span>TF-IDF + LR wrong-route rate at τ = 0.60</span></div>
       </div>
-      <p class="note">Cost reductions range 35.5–38.1% across the four non-LLM baselines
-        (TF-IDF+LR, Linear SVM, Random Forest, DistilBERT). Numbers describe this
-        dataset under the stated cost model; they are not a claim of general or
-        production performance.</p>
+      <div class="calibration-caveat">
+        <b>Calibration caveat</b>
+        <p>Isotonic recalibration lowers reported ECE, but ECE alone does not show
+          whether confidence retains useful ranking ability. The camera-ready
+          analysis therefore reports correctness AUROC and tie-aware AURC beside
+          ECE; GPT-4o-mini few-shot remains at correctness AUROC 0.500.</p>
+      </div>
+      <div class="llm-readiness">
+        <b>LLM deployment-readiness result</b>
+        <p>At the analytically derived break-even threshold τ = 0.80, seven of
+          eight prompted settings route 0 of 1,000 tickets. Haiku few-shot routes
+          19 of 1,000 (1.9%), all correctly, for cost 0.981 versus 1.000 for
+          defer-all. This is a low-coverage observation, not evidence of broad
+          auto-routing readiness.</p>
+      </div>
+      <p class="note">Cost reductions of 35.5–38.1% were reported across four
+        non-LLM baselines under the default cost assumption. These are dataset- and
+        cost-specific measurements, not general production guarantees.</p>
     </section>
 
     <section class="section reproduce" id="reproduce">
       <div class="section-heading">
-        <span>06 · Reproduce</span>
-        <h2>One synthetic run needs no data or keys.</h2>
-        <p>The default client is a no-op mock; nothing calls an external API unless a
-          config opts in. Every run snapshots its config, seeds, dataset hash, and
-          package versions.</p>
+        <span>07 · Reproduce</span>
+        <h2>Separate a smoke test from the camera-ready experiment.</h2>
+        <p>The synthetic path checks that the software runs. The frozen camera-ready
+          claims can be checked from the separate DOI artifact without making new
+          hosted-LLM calls.</p>
       </div>
-      <div class="steps">
-        <div><b>1</b><h3>Install</h3><code>pip install -e '.[test]'</code></div>
-        <div><b>2</b><h3>Smoke run</h3><code>python scripts/run_classification.py --config configs/experiment_small_debug.yaml</code></div>
-        <div><b>3</b><h3>Test</h3><code>pytest</code></div>
-        <div><b>4</b><h3>Inspect</h3><code>ls outputs/&lt;run&gt;/paper_bundle/</code></div>
-      </div>
-      <div class="command-block" aria-label="Headline classical run">
-        <div><span></span><span></span><span></span><b>headline classical run (no API calls)</b></div>
-        <pre><code># place the public CSV at data/it_service_tickets.csv, then:
-python scripts/prepare_data.py    --config configs/experiment_default.yaml
-python scripts/run_classification.py --config configs/experiment_default.yaml
 
-# rebuild the cost sweep from a saved run, no re-prediction:
-python scripts/run_cost_analysis.py --run-dir outputs/&lt;run&gt;</code></pre>
+      <div class="repro-paths">
+        <article>
+          <span class="path-label">Software validation</span>
+          <h3>Run a synthetic smoke test</h3>
+          <p>No external dataset, model download, or API key is required.</p>
+          <pre><code>pip install -e '.[test]'
+python scripts/run_classification.py \
+  --config configs/experiment_small_debug.yaml
+pytest</code></pre>
+        </article>
+        <article>
+          <span class="path-label">Evidence verification</span>
+          <h3>Check the frozen camera-ready record</h3>
+          <p>After the DOI is assigned, extract its archive into the repository root, download dataset version 1, then verify the frozen record.</p>
+          <pre><code># DOI artifact extracts to artifacts/ictai2026/
+python scripts/verify_camera_ready_manifest.py \
+  --paper-dir artifacts/ictai2026
+python scripts/verify_public_claims.py \
+  --artifact-dir artifacts/ictai2026
+python scripts/baselines_on_llm_subsample.py \
+  --input artifacts/ictai2026/table_ii_common_subset.json</code></pre>
+        </article>
       </div>
+
       <div class="callout">
-        <div><h3>The dataset is not redistributed</h3><p>It is public and governed by its
-          own terms. Download it, place the CSV, and the loader reproduces the stratified
-          split from seed 42. A bundled synthetic generator covers tests and smoke runs.</p></div>
-        <a href="#extend">See the extension points ↓</a>
+        <div><h3>Dataset and artifact status</h3><p>The <a href="https://www.kaggle.com/datasets/adisongoh/it-service-ticket-classification-dataset/versions/1">source dataset</a> is CC0 and is not redistributed. The audited public-safe evidence package is stored separately from GitHub and will be linked here through its version-specific DOI. The DOI is currently pending.</p></div>
       </div>
     </section>
 
     <section class="section extend" id="extend">
       <div class="section-heading">
-        <span>07 · Extend</span>
-        <h2>Add a piece without touching the evaluator.</h2>
-        <p>The open/closed design has a runtime proof: a test registers a fake predictor
-          and the evaluator handles it with no code change.</p>
+        <span>08 · Extend</span>
+        <h2>Predictors register cleanly; other pieces need wiring.</h2>
+        <p>The open/closed test proves runtime predictor registration. It does not
+          prove that every extension point is modification-free.</p>
       </div>
       <div class="extend-table">
-        <div class="et-row et-head"><span>Add</span><span>Where</span><span>How</span></div>
-        <div class="et-row"><span>A model</span><span><code>models/</code></span><span>Implement <code>Predictor</code>, decorate <code>@register("name")</code></span></div>
-        <div class="et-row"><span>A confidence method</span><span><code>confidence/</code></span><span>Subclass <code>ConfidenceEstimator</code>, wire into the builder</span></div>
-        <div class="et-row"><span>An abstention policy</span><span><code>abstention/</code></span><span>Subclass <code>AbstentionPolicy</code>, add to the policy set</span></div>
-        <div class="et-row"><span>A dataset</span><span><code>data/loaders.py</code></span><span>Implement <code>DatasetLoader.load()</code>, add a loader branch</span></div>
-        <div class="et-row"><span>An LLM client</span><span><code>llm/</code></span><span>Implement <code>LLMClient.generate()</code>, add a client branch</span></div>
+        <div class="et-row et-head"><span>Add</span><span>Where</span><span>Required integration</span></div>
+        <div class="et-row"><span>A predictor</span><span><code>models/</code></span><span>Implement <code>Predictor</code> and register it; evaluator logic is unchanged</span></div>
+        <div class="et-row"><span>A confidence method</span><span><code>confidence/</code></span><span>Subclass <code>ConfidenceEstimator</code> and wire the confidence builder</span></div>
+        <div class="et-row"><span>An abstention policy</span><span><code>abstention/</code></span><span>Subclass <code>AbstentionPolicy</code> and update the evaluator policy set</span></div>
+        <div class="et-row"><span>A dataset</span><span><code>data/loaders.py</code></span><span>Implement the loader and update the loader factory</span></div>
+        <div class="et-row"><span>An LLM client</span><span><code>llm/</code></span><span>Implement the client and update the client builder</span></div>
       </div>
     </section>
 
     <section class="section limitations" id="limitations">
       <div class="section-heading">
-        <span>08 · Limitations</span>
-        <h2>What this does not claim.</h2>
+        <span>09 · Limitations</span>
+        <h2>What this study does not establish.</h2>
       </div>
       <div class="limitations-list">
-        <div><b>One corpus</b><p>Results are measured on a single public dataset; they do not establish general performance across ticket queues.</p></div>
-        <div><b>Illustrative costs</b><p>The (0, 1, 5) model is a stand-in. Real deployments require organization-specific cost tuning; the grid sweep shows sensitivity.</p></div>
-        <div><b>No deployment</b><p>This is an offline evaluation framework, not a live service or human user study.</p></div>
-        <div><b>Model drift</b><p>LLM numbers depend on model version and prompt wording; fixed names do not freeze a hosted service.</p></div>
+        <div><b>One corpus</b><p>Results on one public ticket dataset do not establish performance across organizations or domains.</p></div>
+        <div><b>Illustrative costs</b><p>The default (0, 1, 5) model is hypothetical; deployment requires organization-specific costs.</p></div>
+        <div><b>Threshold-grid sensitivity</b><p>Primary operating points are the best over five predeclared thresholds. A 0.01-spaced DistilBERT sensitivity sweep moves its calibration choice from 0.90 to 0.94 without changing the conclusion.</p></div>
+        <div><b>Limited policy comparison</b><p>Top probability, top-two margin, and inverse entropy are compared, but no jointly trained learning-to-defer method is evaluated.</p></div>
+        <div><b>Calibration is not discrimination</b><p>A low ECE can coexist with an uninformative or nearly constant confidence score.</p></div>
+        <div><b>Prompt and taxonomy access</b><p>Prompted LLMs receive category names and at most three examples per class, but no label definitions; trained baselines learn label conventions from 33,486 examples.</p></div>
+        <div><b>Agreement-pool confounding</b><p>The main M=9 agreement pool includes supervised TF-IDF + LR. The paper separately reports an LLM-only M=8 control so peer consensus is not conflated with the mixed pool.</p></div>
+        <div><b>Near-duplicate audit</b><p>At cosine similarity ≥ 0.90, 8.33% of the corpus has a near twin and 7.05% of the random test split has a training near twin. A neighbor-group refit changes TF-IDF + LR accuracy from 0.8474 to 0.8500; a direct audit still finds 26 of 14,458 group-test tickets (0.18%) with a group-train near twin.</p></div>
+        <div><b>Offline evidence only</b><p>This is not a deployed service, human user study, or guarantee against provider and model drift.</p></div>
       </div>
+    </section>
+
+    <section class="section publication" id="publication">
+      <div class="publication-panel">
+        <div>
+          <span class="path-label">Publication record</span>
+          <h2>Companion site—not the archival paper.</h2>
+          <p><i>Cost-Aware Abstention for LLM-Based IT Ticket Classification</i>,
+            Sachin Gupta. Accepted at IEEE ICTAI 2026. The DOI and IEEE Xplore URL
+            will be added after publication. The complete methods, tables,
+            uncertainty analysis, limitations, and interpretation belong to that
+            archival paper; this page is a navigation and verification aid.</p>
+        </div>
+        <div class="publication-status">
+          <b>Current status</b>
+          <span>Accepted manuscript · archival record pending</span>
+          <small>No IEEE Version of Record is hosted on this site.</small>
+          <a href="https://conferences.ieeeauthorcenter.ieee.org/author-ethics/guidelines-and-policies/submission-policies/">IEEE author posting policy ↗</a>
+        </div>
+      </div>
+      <p class="rights-note"><b>Rights:</b> code is MIT-licensed; the dataset retains
+        its upstream CC0 dedication; manuscript and paper-derived material are
+        governed by the applicable IEEE electronic copyright form. This independent
+        project site is not an official IEEE or ICTAI website.</p>
     </section>
   </main>
 
   <footer>
     <div>
       <b>RouteGuard</b>
-      <span>Cost-aware abstention for text classification · MIT-licensed evaluation framework</span>
-      <span class="foot-cite">Companion code for “Cost-Aware Abstention for LLM-Based IT Ticket Classification,” IEEE ICTAI 2026.</span>
+      <span>MIT-licensed evaluation framework · dataset not redistributed</span>
+      <span class="foot-cite">Companion code for an accepted IEEE ICTAI 2026 paper. DOI and IEEE Xplore link pending.</span>
     </div>
-    <div><a href="#overview">Top ↑</a><a href="https://github.com/sachinkg12/RouteGuard">GitHub ↗</a></div>
+    <div><a href="#overview">Top ↑</a><a href="#publication">Paper status</a><a href="https://github.com/sachinkg12/RouteGuard">GitHub ↗</a></div>
   </footer>
 </body>
 </html>

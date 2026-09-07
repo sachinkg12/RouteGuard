@@ -114,20 +114,20 @@ def abstention_table(results) -> pd.DataFrame:
 def cost_table(results) -> pd.DataFrame:
     rows = []
     for r in results:
-        ci = (r.metadata or {}).get("bootstrap", {}).get(
-            "best_threshold_vs_always_route_cost_per_ticket"
-        )
-        ci_dict = ci if isinstance(ci, dict) else {}
-        # The bootstrap CI was computed for exactly ONE row: the cost-minimizing
-        # threshold policy at the default wrong-route cost. Attach it only there,
-        # never broadcast it across every threshold row.
-        best_policy = ci_dict.get("best_policy")
-        best_wrong_cost = ci_dict.get("wrong_route_cost")
+        bootstrap = (r.metadata or {}).get("bootstrap", {})
+        absolute_ci = bootstrap.get("selected_threshold_vs_always_route_cost_difference", {})
+        relative_ci = bootstrap.get("selected_threshold_vs_always_route_relative_reduction", {})
+        ci_dict = absolute_ci if isinstance(absolute_ci, dict) else {}
+        relative_ci_dict = relative_ci if isinstance(relative_ci, dict) else {}
+        # CIs belong to exactly one test row: the operating point frozen on the
+        # calibration split at the default wrong-route cost.
+        selected_policy = ci_dict.get("selected_policy")
+        selected_wrong_cost = ci_dict.get("wrong_route_cost")
         for c in r.cost:
             attach_ci = (
-                best_policy is not None
-                and c["policy"] == best_policy
-                and c["wrong_auto_route_cost"] == best_wrong_cost
+                selected_policy is not None
+                and c["policy"] == selected_policy
+                and c["wrong_auto_route_cost"] == selected_wrong_cost
             )
             rows.append(
                 {
@@ -142,6 +142,9 @@ def cost_table(results) -> pd.DataFrame:
                     "cost_reduction_vs_always_defer": c["cost_reduction_vs_always_defer"],
                     "cost_delta_vs_always_route_ci_low": ci_dict.get("ci_low") if attach_ci else None,
                     "cost_delta_vs_always_route_ci_high": ci_dict.get("ci_high") if attach_ci else None,
+                    "relative_cost_reduction_ci_low": relative_ci_dict.get("ci_low") if attach_ci else None,
+                    "relative_cost_reduction_ci_high": relative_ci_dict.get("ci_high") if attach_ci else None,
+                    "threshold_selection_split": ci_dict.get("selection_split") if attach_ci else None,
                 }
             )
     return pd.DataFrame(rows)

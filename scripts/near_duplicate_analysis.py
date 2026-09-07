@@ -1,12 +1,14 @@
-"""Near-duplicate audit + group-aware (leakage-free) re-evaluation of the
+"""Near-duplicate audit + neighbor-group-aware re-evaluation of the
 classical baselines.
 
 Motivation: a single stratified *random* split can place near-duplicate or
 template-like tickets in both train and test, which can inflate lexical
 classifiers. This script quantifies exact/near-duplicate rates, measures how
 much of the main random split leaks near-twins across train/test, and re-fits
-the classical baselines under a *group-aware* split (near-duplicate clusters kept
-on the same side) to show the classical-vs-LLM gap survives.
+the classical baselines under a *neighbor-group-aware* split. The grouping graph
+is built from a finite nearest-neighbor list, so the script also performs a direct
+test-to-train nearest-neighbor audit after splitting rather than assuming that
+disjoint graph components eliminate every cross-split near twin.
 
 Run (uses the same loader/split as the main experiments):
     .venv/bin/python scripts/near_duplicate_analysis.py --config configs/experiment_default.yaml
@@ -141,8 +143,8 @@ def main():
         print(f"  test tickets with a train near-twin sim>={thr:.2f}: "
               f"{leak} ({100*leak/len(split.test_texts):.2f}% of test){tag}")
 
-    # ---- 4. group-aware (leakage-free) re-evaluation ----
-    print("\n=== 4. GROUP-AWARE SPLIT RE-EVALUATION (clusters kept together) ===")
+    # ---- 4. neighbor-group-aware re-evaluation ----
+    print("\n=== 4. NEIGHBOR-GROUP-AWARE SPLIT RE-EVALUATION ===")
     # random-split baseline (main pipeline) for reference
     acc_rand, f1_rand = classical_fit_eval(
         split.train_texts, split.train_labels, split.test_texts, split.test_labels,
@@ -153,14 +155,25 @@ def main():
     # train fraction (~70%) matches the main random split (only leakage differs)
     gss = GroupShuffleSplit(n_splits=1, test_size=0.30, random_state=42)
     gtr, gte = next(gss.split(np.arange(n), groups=primary_comp))
-    # verify zero shared clusters
+    # Graph components are disjoint by construction, but because the graph is
+    # built from only five non-self neighbors this does not prove that no
+    # cross-split pair exceeds the similarity threshold. Audit that directly.
     shared = set(primary_comp[gtr]) & set(primary_comp[gte])
     acc_grp, f1_grp = classical_fit_eval(
         [texts[i] for i in gtr], [labels[i] for i in gtr],
         [texts[i] for i in gte], [labels[i] for i in gte],
         args.clf_features)
-    print(f"  TF-IDF+LR on GROUP split (leakage-free): acc={acc_grp:.4f} macroF1={f1_grp:.4f}")
-    print(f"  shared clusters across group split: {len(shared)} (should be 0)")
+    Xgtr = X[gtr]
+    Xgte = X[gte]
+    nn_gtr = NearestNeighbors(n_neighbors=1, metric="cosine", algorithm="brute", n_jobs=-1)
+    nn_gtr.fit(Xgtr)
+    d_gte, _ = nn_gtr.kneighbors(Xgte)
+    sim_gte = 1.0 - d_gte.ravel()
+    residual = int((sim_gte >= PRIMARY).sum())
+    print(f"  TF-IDF+LR on GROUP split: acc={acc_grp:.4f} macroF1={f1_grp:.4f}")
+    print(f"  shared finite-kNN graph clusters: {len(shared)} (must be 0)")
+    print(f"  direct group-test tickets with a group-train near-twin sim>={PRIMARY:.2f}: "
+          f"{residual} ({100*residual/len(gte):.2f}% of group test)")
     print(f"  group train/test sizes: {len(gtr)}/{len(gte)}")
 
     print("\n=== SUMMARY ===")
@@ -168,6 +181,8 @@ def main():
     print(f"  near-dup rate (>=.90): {100*primary_in_cluster/n:.2f}% of corpus")
     print(f"  random-split acc    : {acc_rand:.4f}")
     print(f"  group-split acc     : {acc_grp:.4f}  (drop {acc_rand-acc_grp:+.4f})")
+    print(f"  residual group leakage (>=.90): {residual}/{len(gte)} "
+          f"({100*residual/len(gte):.2f}% of group test)")
     print(f"  best LLM acc        : 0.477 (unaffected: zero/few-shot, not trained)")
     print(f"  gap random -> group : {acc_rand-0.477:.3f} -> {acc_grp-0.477:.3f}")
 

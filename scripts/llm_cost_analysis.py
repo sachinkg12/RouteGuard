@@ -1,90 +1,85 @@
-"""Quantify cost-aware abstention for each LLM (raw and isotonic-recalibrated).
+"""Evaluate the fixed cost-derived LLM policy on frozen test predictions.
 
-Addresses R2 #1: the claim that LLM cost-minimizing policies collapse to
-defer-most needs a table, not just prose. Computes per-LLM minimum
-expected cost across thresholds on the 1000-ticket subsample, under both
-raw and isotonic confidence.
+The break-even threshold is derived analytically from the configured costs; this
+script never chooses a threshold from test outcomes. Raw verbalized confidence is
+not treated as a probability for deployment-policy selection.
 """
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import numpy as np
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LLM_INPUTS = REPO_ROOT / "artifacts" / "ictai2026" / "llm_inputs"
 
-def cost(confs, preds, trues, tau, c_ok=0.0, c_triage=1.0, c_wrong=5.0):
-    per = []
-    for c, p, t in zip(confs, preds, trues):
-        per.append(c_triage if c < tau else (c_ok if p == t else c_wrong))
-    return sum(per) / len(per), np.array(per)
+
+def cost(confs, correctness, tau, c_ok=0.0, c_triage=1.0, c_wrong=5.0):
+    scores = np.asarray(confs, dtype=float)
+    correct = np.asarray(correctness, dtype=bool)
+    if scores.shape != correct.shape:
+        raise ValueError("confidence and correctness vectors must have equal length")
+    routed = scores >= tau
+    per = np.where(routed, np.where(correct, c_ok, c_wrong), c_triage)
+    return float(per.mean()), per
 
 
 def coverage(confs, tau):
     return sum(1 for c in confs if c >= tau) / len(confs)
 
 
-def analyze(name, raw_path, iso_path, trues):
+def correctness_from_raw_result(record):
+    rows = [
+        row
+        for row in record["cost"]
+        if row["policy"] == "always_route" and row["wrong_auto_route_cost"] == 5.0
+    ]
+    if len(rows) != 1:
+        raise RuntimeError("cannot identify the canonical always-route cost vector")
+    costs = np.asarray(rows[0]["per_ticket_costs"], dtype=float)
+    if not np.all(np.isin(costs, [0.0, 5.0])):
+        raise RuntimeError("unexpected values in always-route per-ticket costs")
+    return costs == 0.0
+
+
+def analyze(name, raw_path, iso_path, tau=0.8):
     raw = json.loads(Path(raw_path).read_text())
     iso = json.loads(Path(iso_path).read_text())
-    raw_confs = raw["confidences"]
     iso_confs = iso["confidences"]
-    preds = raw["predictions"]
-    assert preds == iso["predictions"], "predictions diverge"
+    if raw["predictions"] != iso["predictions"]:
+        raise RuntimeError("predictions diverge between raw and isotonic artifacts")
+    correctness = correctness_from_raw_result(raw)
 
-    always, _ = cost(raw_confs, preds, trues, tau=0.0)
-    thresholds = [0.5, 0.6, 0.7, 0.8, 0.9]
-    results = {"raw": {}, "iso": {}}
-    for label, confs in [("raw", raw_confs), ("iso", iso_confs)]:
-        for tau in thresholds:
-            c, _ = cost(confs, preds, trues, tau)
-            cov = coverage(confs, tau)
-            results[label][tau] = (c, cov)
-    # Best across thresholds (excluding always-route)
-    best_raw_tau = min(results["raw"], key=lambda t: results["raw"][t][0])
-    best_iso_tau = min(results["iso"], key=lambda t: results["iso"][t][0])
-    best_raw_cost, best_raw_cov = results["raw"][best_raw_tau]
-    best_iso_cost, best_iso_cov = results["iso"][best_iso_tau]
+    always, _ = cost(iso_confs, correctness, tau=0.0)
+    fixed_cost, _ = cost(iso_confs, correctness, tau)
+    fixed_cov = coverage(iso_confs, tau)
+    n_routed = sum(1 for c in iso_confs if c >= tau)
 
     # Also include policy = always-route, agreement_geq_9 is in the JSON
     print(f"\n=== {name} ===")
     print(f"  always_route: E[cost] = {always:.4f} (cov 100.0%)")
-    print(f"  RAW: best tau={best_raw_tau} -> E[cost]={best_raw_cost:.4f}, cov={best_raw_cov*100:.1f}%")
-    print(f"  ISO: best tau={best_iso_tau} -> E[cost]={best_iso_cost:.4f}, cov={best_iso_cov*100:.1f}%")
-    rel_raw = (always - best_raw_cost) / always * 100
-    rel_iso = (always - best_iso_cost) / always * 100
-    print(f"  Δ vs always: raw={rel_raw:+.1f}%, iso={rel_iso:+.1f}%")
+    print(
+        f"  ISO fixed tau={tau:.2f}: E[cost]={fixed_cost:.4f}, "
+        f"routed={n_routed}/{len(iso_confs)} ({fixed_cov*100:.1f}%)"
+    )
+    rel_always = (always - fixed_cost) / always * 100
+    rel_defer = (1.0 - fixed_cost) * 100
+    print(f"  Δ: vs always-route={rel_always:+.1f}%, vs always-defer={rel_defer:+.1f}%")
     return {
         "name": name, "always": always,
-        "raw_tau": best_raw_tau, "raw_cost": best_raw_cost, "raw_cov": best_raw_cov, "raw_rel": rel_raw,
-        "iso_tau": best_iso_tau, "iso_cost": best_iso_cost, "iso_cov": best_iso_cov, "iso_rel": rel_iso,
+        "threshold": tau,
+        "n_test": len(iso_confs),
+        "iso_cost": fixed_cost,
+        "iso_cov": fixed_cov,
+        "n_routed": n_routed,
+        "relative_vs_always_route": rel_always,
+        "relative_vs_always_defer": rel_defer,
     }
 
 
 def main():
-    from ticket_routing.data.loaders import build_loader_from_config
-    from ticket_routing.data.splitters import (
-        stratified_test_subsample_for_llm, stratified_three_way_split,
-    )
-    from ticket_routing.utils.config import load_config
-    cfg = load_config("configs/experiment_default.yaml")
-    bundle = build_loader_from_config(cfg.dataset).load()
-    split = stratified_three_way_split(
-        bundle,
-        train_fraction=cfg.split.train_fraction,
-        calibration_fraction=cfg.split.calibration_fraction,
-        test_fraction=cfg.split.test_fraction,
-        seed=cfg.dataset.random_seed,
-    )
-    sub_texts, sub_labels = stratified_test_subsample_for_llm(
-        split.test_texts, split.test_labels, max_total=1000, seed=42,
-    )
-    print(f"Subsample size: {len(sub_labels)}")
-
-    raw_dir = Path("outputs/paper_llm_4way_isotonic_retry__20260522_000630/paper_bundle/raw")
+    raw_dir = LLM_INPUTS
     variants = [
         ("Anthropic Haiku 4.5 (few-shot)", "haiku_few_shot_k3"),
         ("GPT-4o-mini (few-shot)",     "gpt4o_mini_few_shot_k3"),
@@ -103,17 +98,18 @@ def main():
         raw_p = raw_dir / f"{base}__{setting}__model_reported.json"
         iso_p = raw_dir / f"{base}__{setting}__isotonic.json"
         if not raw_p.exists() or not iso_p.exists():
-            print(f"MISSING {base}, skipping")
-            continue
-        r = analyze(display, raw_p, iso_p, sub_labels)
+            raise FileNotFoundError(f"required frozen inputs missing for {base}")
+        r = analyze(display, raw_p, iso_p)
         all_results.append(r)
 
     print("\n\n=== SUMMARY TABLE ===")
-    print(f"{'LLM':<32} {'always':>7} {'raw_best':>15} {'iso_best':>15}")
+    print(f"{'LLM':<32} {'always':>7} {'fixed iso policy':>28}")
     for r in all_results:
-        raw_str = f"τ={r['raw_tau']} {r['raw_cost']:.3f} ({r['raw_rel']:+.1f}%)"
-        iso_str = f"τ={r['iso_tau']} {r['iso_cost']:.3f} ({r['iso_rel']:+.1f}%)"
-        print(f"{r['name']:<32} {r['always']:>7.3f} {raw_str:>15} {iso_str:>15}")
+        fixed = (
+            f"τ={r['threshold']:.2f} {r['iso_cost']:.3f}; "
+            f"{r['n_routed']}/{r['n_test']} routed"
+        )
+        print(f"{r['name']:<32} {r['always']:>7.3f} {fixed:>28}")
 
 
 if __name__ == "__main__":

@@ -180,8 +180,11 @@ def _aggregate_samples(
             votes[s["label"]] += 1
         winner = max(votes.items(), key=lambda kv: kv[1])
         share = winner[1] / len(samples)
-        # If only one sample, fall back to model-reported confidence when present.
-        if len(samples) == 1 and valid[0]["confidence"] is not None:
+        # A single sample has no meaningful vote-share estimate. Its required,
+        # model-reported confidence is the only valid confidence signal.
+        if len(samples) == 1:
+            if valid[0]["confidence"] is None:
+                return "__PARSE_ERROR__", 0.0, PARSE_ERROR
             return valid[0]["label"], float(valid[0]["confidence"]), PARSE_OK
         return winner[0], float(share), PARSE_OK
 

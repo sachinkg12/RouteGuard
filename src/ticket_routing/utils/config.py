@@ -99,6 +99,10 @@ class AbstentionConfig(BaseModel):
         default_factory=lambda: [0.50, 0.60, 0.70, 0.80, 0.90]
     )
     agreement_min: int = 2
+    # Agreement-based abstention is a distinct policy family. Merely supplying
+    # auxiliary predictors for an agreement confidence score must not silently
+    # add agreement policies to the experiment.
+    include_agreement_policies: bool = False
 
 
 class CostConfig(BaseModel):

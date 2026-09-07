@@ -1,8 +1,8 @@
 """Evaluator: composes metrics, calibration, abstention, and cost over predictors.
 
-The evaluator treats every predictor as a Predictor + PredictionBatch. It does
-not inspect predictor internals, and stays unchanged when you add new models,
-confidence methods, or abstention policies.
+The evaluator treats every predictor as a Predictor + PredictionBatch and does
+not inspect predictor internals. Predictor registration does not require changes
+here; confidence estimators and optional policy sets are wired explicitly.
 """
 from __future__ import annotations
 
@@ -51,6 +51,7 @@ class Evaluator:
         correct_auto_cost: float,
         thresholds: Sequence[float],
         agreement_min: int = 2,
+        include_agreement_policies: bool = False,
     ) -> None:
         self.cost_options = list(cost_options)
         self.default_wrong_cost = default_wrong_cost
@@ -58,6 +59,7 @@ class Evaluator:
         self.correct_auto_cost = correct_auto_cost
         self.thresholds = list(thresholds)
         self.agreement_min = agreement_min
+        self.include_agreement_policies = include_agreement_policies
 
     def evaluate(
         self,
@@ -154,7 +156,7 @@ class Evaluator:
         policies: List[AbstentionPolicy] = [AlwaysRoutePolicy()]
         for t in self.thresholds:
             policies.append(ThresholdAbstentionPolicy(threshold=t))
-        if auxiliary_batches:
+        if self.include_agreement_policies and auxiliary_batches:
             from ..abstention.agreement_policy import AgreementAbstentionPolicy
 
             total = 1 + len(auxiliary_batches)

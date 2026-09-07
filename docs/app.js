@@ -1,9 +1,11 @@
 /* RouteGuard docs — interactivity.
-   No external libraries. All numbers are the measured operating points of the
-   strongest classical baseline (TF-IDF + Logistic Regression) on the test set. */
+   No external libraries. The explorer uses frozen test operating points from
+   the headline TF-IDF + Logistic Regression baseline. It is descriptive only:
+   it does not select a deployable threshold or replace calibration selection. */
 (function () {
   "use strict";
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var TRIAGE_COST = 1;
 
   /* -------- measured operating points (coverage, routed accuracy) -------- */
   // Accuracies carry an extra digit so E[cost] reproduces the reported Table IV
@@ -16,8 +18,9 @@
     { label: "τ = 0.80", cov: 0.487, acc: 0.9823 },
     { label: "τ = 0.90", cov: 0.337, acc: 0.9941 }
   ];
-  // Expected cost per item: deferred pay triage (1); auto-routed-but-wrong pay cWrong; correct pay 0.
-  function cost(p, cWrong) { return (1 - p.cov) * 1 + p.cov * (1 - p.acc) * cWrong; }
+  // Expected cost per item: deferred items pay fixed triage cost; wrong routed
+  // items pay the slider value; correct routed items cost zero.
+  function cost(p, cWrong) { return (1 - p.cov) * TRIAGE_COST + p.cov * (1 - p.acc) * cWrong; }
 
   /* ============================ cost explorer ============================ */
   function initExplorer() {
@@ -36,11 +39,12 @@
     var rows = all.map(function (p) {
       var row = document.createElement("div");
       row.className = "bar" + (p.baseline ? " is-baseline" : "");
+      row.setAttribute("role", "listitem");
       var label = document.createElement("div");
       label.className = "bar-label";
       label.innerHTML = p.baseline
         ? "always<small>route all</small>"
-        : p.label + "<small>cov " + Math.round(p.cov * 100) + "%</small>";
+        : p.label + "<small>cov " + (p.cov * 100).toFixed(1) + "%</small>";
       var track = document.createElement("div"); track.className = "bar-track";
       var fill = document.createElement("div"); fill.className = "bar-fill";
       track.appendChild(fill);
@@ -55,7 +59,8 @@
       out.textContent = cw + "×";
       var costs = all.map(function (p) { return cost(p, cw); });
       var maxCost = Math.max.apply(null, costs);
-      // best = lowest cost
+      // Lowest cost among the displayed frozen test points. This is not
+      // threshold selection; the paper protocol selects on calibration data.
       var bestIdx = 0;
       for (var i = 1; i < costs.length; i++) if (costs[i] < costs[bestIdx]) bestIdx = i;
       var alwaysCost = costs[0];
@@ -65,11 +70,13 @@
         r.fill.style.width = (maxCost > 0 ? (c / maxCost) * 100 : 0) + "%";
         r.val.textContent = c.toFixed(3);
         r.row.classList.toggle("is-best", i === bestIdx);
+        r.row.setAttribute("aria-label", r.p.label + ": expected test cost " + c.toFixed(3)
+          + (i === bestIdx ? ", lowest among displayed policies" : ""));
         // clear any prior tag
         var old = r.row.querySelector(".bar-tag"); if (old) old.remove();
         if (i === bestIdx) {
           var tag = document.createElement("span");
-          tag.className = "bar-tag"; tag.textContent = "lowest";
+          tag.className = "bar-tag"; tag.textContent = "lowest shown";
           r.val.appendChild(tag);
         }
       });
@@ -88,12 +95,13 @@
       }
 
       if (bestIdx === 0) {
-        readEl.textContent = "At " + cw + "×, mistakes are cheap enough that auto-routing "
-          + "everything wins — deferring costs more triage than it saves.";
+        readEl.textContent = "Among these displayed test-set points, always-route has the "
+          + "lowest cost when a wrong route costs " + cw + "× human triage.";
       } else {
-        readEl.textContent = "At " + cw + "×, " + best.label + " is cost-minimizing: it defers the "
-          + (100 - Math.round(best.cov * 100)) + "% least-confident items, cutting expected cost "
-          + Math.abs(delta).toFixed(1) + "% below always-routing.";
+        readEl.textContent = "Among these displayed test-set points, " + best.label
+          + " has the lowest shown cost when a wrong route costs " + cw + "× human triage. "
+          + "It defers " + (100 * (1 - best.cov)).toFixed(1) + "% of tickets and is "
+          + Math.abs(delta).toFixed(1) + "% below always-route in this illustration.";
       }
     }
 
@@ -144,6 +152,13 @@
 
   /* ============================ observers ============================ */
   function initObservers() {
+    if (!("IntersectionObserver" in window)) {
+      document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("in"); });
+      var fallbackFlow = document.getElementById("flow");
+      if (fallbackFlow) fallbackFlow.classList.add("in");
+      document.querySelectorAll("[data-count]").forEach(countUp);
+      return;
+    }
     // reveal + one-shot animations
     var once = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
@@ -161,13 +176,17 @@
     // scrollspy for the sidebar
     var links = {};
     document.querySelectorAll(".side-nav nav a").forEach(function (a) {
-      var id = a.getAttribute("href").slice(1); links[id] = a;
+      var id = a.getAttribute("href").slice(1);
+      if (!links[id]) links[id] = [];
+      links[id].push(a);
     });
     var spy = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (!e.isIntersecting) return;
         var id = e.target.id;
-        Object.keys(links).forEach(function (k) { links[k].classList.toggle("is-active", k === id); });
+        Object.keys(links).forEach(function (k) {
+          links[k].forEach(function (link) { link.classList.toggle("is-active", k === id); });
+        });
       });
     }, { rootMargin: "-45% 0px -50% 0px", threshold: 0 });
     document.querySelectorAll("main section[id]").forEach(function (s) { spy.observe(s); });
@@ -181,9 +200,16 @@
   }
 
   function boot() {
+    document.documentElement.classList.add("js-ready");
     tagReveals();
     initExplorer();
     initObservers();
+    document.querySelectorAll(".mobile-nav nav a").forEach(function (link) {
+      link.addEventListener("click", function () {
+        var menu = link.closest("details");
+        if (menu) menu.removeAttribute("open");
+      });
+    });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();

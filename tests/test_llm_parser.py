@@ -44,6 +44,13 @@ def test_missing_label_is_parse_error():
     assert out.status == PARSE_ERROR
 
 
+def test_missing_or_nonfinite_confidence_is_parse_error():
+    missing = parse_label_json('{"label": "email"}', ALLOWED)
+    nonfinite = parse_label_json('{"label": "email", "confidence": NaN}', ALLOWED)
+    assert missing.status == PARSE_ERROR
+    assert nonfinite.status == PARSE_ERROR
+
+
 def test_json_after_brace_containing_preamble_is_extracted():
     # Regression: the old greedy `{.*}` regex failed when a reasoning preamble
     # contained braces (set notation, code) before the real JSON object.
