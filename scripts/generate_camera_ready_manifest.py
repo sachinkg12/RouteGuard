@@ -9,7 +9,11 @@ analytically before looking at test outcomes.
 Run from the repository root:
 
     .venv/bin/python scripts/generate_camera_ready_manifest.py \
-      --paper-dir /absolute/path/to/papers/ictai2026
+      --paper-dir /absolute/path/to/papers/ictai2026 \
+      --artifact-dir /absolute/path/to/artifacts/ictai2026
+
+``--artifact-dir`` may point to a DOI-artifact extraction outside Git, so the
+paper-specific prediction vectors do not need to live in the code repository.
 """
 from __future__ import annotations
 
@@ -51,19 +55,17 @@ COST = CostModel(correct_auto_route=0.0, human_triage=1.0, wrong_auto_route=5.0)
 PREDECLARED_GRID = [0.50, 0.60, 0.70, 0.80, 0.90]
 DENSE_GRID = [round(v, 2) for v in np.arange(0.00, 1.001, 0.01)]
 DISTIL_DENSE_GRID = [round(v, 2) for v in np.arange(0.50, 1.00, 0.01)]
+COST_SENSITIVITY_THRESHOLDS = [
+    round(v, 2) for v in np.arange(0.01, 1.00, 0.01)
+]
+COST_SENSITIVITY_TRIAGE = [0.5, 1.0, 1.5, 2.0]
+COST_SENSITIVITY_WRONG = [2.0, 5.0, 10.0, 20.0]
 BOOTSTRAP_SAMPLES = 1000
 BOOTSTRAP_SEED = 1337
 BREAK_EVEN_THRESHOLD = 1.0 - COST.human_triage / COST.wrong_auto_route
 REVIEW_SOURCE_SHA256 = "292cea4e68d502b78a90c7f8e69311400a3a56ad64317448306951fc59c84a7b"
 REVIEW_SUPPLEMENT_SHA256 = "0a6f50688c1330617a89e4548222d786240f220ad7cdef5e40c8d8d80b28baba"
 
-LLM_BUNDLE = (
-    REPO_ROOT
-    / "artifacts"
-    / "ictai2026"
-    / "llm_inputs"
-)
-TABLE_II_INPUT = REPO_ROOT / "artifacts" / "ictai2026" / "table_ii_common_subset.json"
 DISTIL_PREDICTIONS = REPO_ROOT / "outputs" / "distilbert_calib_test_preds.json"
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "experiment_default.yaml"
 CLASSICAL_CONFIG = REPO_ROOT / "configs" / "experiment_classical_extras.yaml"
@@ -207,7 +209,223 @@ def select_and_evaluate(
     }
 
 
-def classical_analysis(split) -> tuple[list[dict], list[dict]]:
+def _cost_vector(
+    correctness: Sequence[bool],
+    scores: Sequence[float],
+    policy: str,
+    *,
+    human_triage: float,
+    wrong_auto_route: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-ticket costs and routing decisions for one policy."""
+    correct = np.asarray(correctness, dtype=bool)
+    confidence = np.asarray(scores, dtype=float)
+    if policy == "always_route":
+        routed = np.ones(correct.size, dtype=bool)
+    elif policy == "always_defer":
+        routed = np.zeros(correct.size, dtype=bool)
+    else:
+        threshold = float(policy.split("@", 1)[1])
+        routed = confidence >= threshold
+    costs = np.where(
+        routed,
+        np.where(correct, 0.0, wrong_auto_route),
+        human_triage,
+    ).astype(float)
+    return costs, routed
+
+
+def lr_cost_model_sensitivity(
+    *,
+    calibration_predictions: Sequence[str],
+    calibration_labels: Sequence[str],
+    calibration_scores: Sequence[float],
+    test_predictions: Sequence[str],
+    test_labels: Sequence[str],
+    test_scores: Sequence[float],
+) -> dict:
+    """Select each cost-specific policy on calibration and test it once."""
+    calibration_correct = np.asarray(calibration_predictions) == np.asarray(
+        calibration_labels
+    )
+    test_correct = np.asarray(test_predictions) == np.asarray(test_labels)
+    rows = []
+    for human_triage in COST_SENSITIVITY_TRIAGE:
+        for wrong_auto_route in COST_SENSITIVITY_WRONG:
+            candidate_costs = []
+            for rank, policy in enumerate(("always_route", "always_defer")):
+                costs, _ = _cost_vector(
+                    calibration_correct,
+                    calibration_scores,
+                    policy,
+                    human_triage=human_triage,
+                    wrong_auto_route=wrong_auto_route,
+                )
+                candidate_costs.append((float(costs.mean()), rank, -1.0, policy))
+            for threshold in COST_SENSITIVITY_THRESHOLDS:
+                policy = f"threshold@{threshold:.2f}"
+                costs, _ = _cost_vector(
+                    calibration_correct,
+                    calibration_scores,
+                    policy,
+                    human_triage=human_triage,
+                    wrong_auto_route=wrong_auto_route,
+                )
+                candidate_costs.append(
+                    (float(costs.mean()), 2, float(threshold), policy)
+                )
+
+            calibration_cost, _, threshold_key, selected_policy = min(
+                candidate_costs, key=lambda item: (item[0], item[1], item[2])
+            )
+            selected_threshold = (
+                None if selected_policy.startswith("always_") else threshold_key
+            )
+            policy_costs, routed = _cost_vector(
+                test_correct,
+                test_scores,
+                selected_policy,
+                human_triage=human_triage,
+                wrong_auto_route=wrong_auto_route,
+            )
+            always_route, _ = _cost_vector(
+                test_correct,
+                test_scores,
+                "always_route",
+                human_triage=human_triage,
+                wrong_auto_route=wrong_auto_route,
+            )
+            always_defer, _ = _cost_vector(
+                test_correct,
+                test_scores,
+                "always_defer",
+                human_triage=human_triage,
+                wrong_auto_route=wrong_auto_route,
+            )
+            if always_route.mean() <= always_defer.mean():
+                lower_trivial_name = "always_route"
+                lower_trivial = always_route
+            else:
+                lower_trivial_name = "always_defer"
+                lower_trivial = always_defer
+            n_routed = int(routed.sum())
+            relative_route = bootstrap_relative_reduction(
+                policy_costs,
+                always_route,
+                n_samples=BOOTSTRAP_SAMPLES,
+                seed=BOOTSTRAP_SEED,
+            )
+            relative_defer = bootstrap_relative_reduction(
+                policy_costs,
+                always_defer,
+                n_samples=BOOTSTRAP_SAMPLES,
+                seed=BOOTSTRAP_SEED,
+            )
+            relative_lower = bootstrap_relative_reduction(
+                policy_costs,
+                lower_trivial,
+                n_samples=BOOTSTRAP_SAMPLES,
+                seed=BOOTSTRAP_SEED,
+            )
+            rows.append(
+                {
+                    "cost_parameters": {
+                        "correct_auto_route": 0.0,
+                        "human_triage": human_triage,
+                        "wrong_auto_route": wrong_auto_route,
+                    },
+                    "selection": {
+                        "split": "calibration",
+                        "n_selection_examples": int(calibration_correct.size),
+                        "candidate_policies": 2
+                        + len(COST_SENSITIVITY_THRESHOLDS),
+                        "threshold_grid": COST_SENSITIVITY_THRESHOLDS,
+                        "tie_break": (
+                            "prefer always_route, then always_defer, then the "
+                            "smallest threshold when calibration costs are equal"
+                        ),
+                        "policy": selected_policy,
+                        "threshold": selected_threshold,
+                        "expected_cost_per_ticket": calibration_cost,
+                    },
+                    "test": {
+                        "n_test": int(test_correct.size),
+                        "policy_cost": float(policy_costs.mean()),
+                        "coverage": float(routed.mean()),
+                        "accuracy_on_routed": (
+                            float(test_correct[routed].mean()) if n_routed else None
+                        ),
+                        "always_route_cost": float(always_route.mean()),
+                        "always_defer_cost": float(always_defer.mean()),
+                        "lower_cost_trivial_policy": lower_trivial_name,
+                        "relative_reduction_vs_always_route": relative_route,
+                        "relative_reduction_vs_always_defer": relative_defer,
+                        "relative_reduction_vs_lower_cost_trivial": relative_lower,
+                    },
+                }
+            )
+
+    positive_rows = [
+        row
+        for row in rows
+        if row["test"]["relative_reduction_vs_lower_cost_trivial"][
+            "point_estimate"
+        ]
+        > 0.0
+    ]
+    negative_rows = [
+        row
+        for row in rows
+        if row["test"]["relative_reduction_vs_lower_cost_trivial"][
+            "point_estimate"
+        ]
+        < 0.0
+    ]
+    return {
+        "analysis_role": "post_hoc_cost_parameter_sensitivity",
+        "model": "TF-IDF + logistic regression",
+        "confidence_score": "top_class_probability",
+        "cost_grid": {
+            "correct_auto_route": [0.0],
+            "human_triage": COST_SENSITIVITY_TRIAGE,
+            "wrong_auto_route": COST_SENSITIVITY_WRONG,
+            "n_settings": len(rows),
+            "equal_cost_boundary": {
+                "human_triage": 2.0,
+                "wrong_auto_route": 2.0,
+            },
+        },
+        "rows": rows,
+        "summary": {
+            "threshold_policy_selected_on_calibration": sum(
+                row["selection"]["policy"].startswith("threshold@")
+                for row in rows
+            ),
+            "always_route_selected_on_calibration": sum(
+                row["selection"]["policy"] == "always_route" for row in rows
+            ),
+            "always_defer_selected_on_calibration": sum(
+                row["selection"]["policy"] == "always_defer" for row in rows
+            ),
+            "test_cost_lower_than_both_trivial_policies": len(positive_rows),
+            "test_cost_equal_to_lower_cost_trivial_policy": sum(
+                row["test"]["relative_reduction_vs_lower_cost_trivial"][
+                    "point_estimate"
+                ]
+                == 0.0
+                for row in rows
+            ),
+            "test_cost_higher_than_lower_cost_trivial_policy": len(negative_rows),
+            "positive_rows_with_ratio_bootstrap_ci_excluding_zero": sum(
+                row["test"]["relative_reduction_vs_lower_cost_trivial"]["ci_low"]
+                > 0.0
+                for row in positive_rows
+            ),
+        },
+    }
+
+
+def classical_analysis(split) -> tuple[list[dict], list[dict], dict]:
     models = [
         (
             "TF-IDF + logistic regression",
@@ -244,6 +462,7 @@ def classical_analysis(split) -> tuple[list[dict], list[dict]]:
 
     primary = []
     comparator_rows = []
+    cost_sensitivity = None
     for name, model in models:
         print(f"Fitting {name}...", flush=True)
         model.fit(split.train_texts, split.train_labels, split.label_names)
@@ -275,6 +494,14 @@ def classical_analysis(split) -> tuple[list[dict], list[dict]]:
         primary.append(record)
 
         if name == "TF-IDF + logistic regression":
+            cost_sensitivity = lr_cost_model_sensitivity(
+                calibration_predictions=calibration_batch.predicted_labels,
+                calibration_labels=split.calib_labels,
+                calibration_scores=calibration_batch.confidence_scores or [],
+                test_predictions=test_batch.predicted_labels,
+                test_labels=split.test_labels,
+                test_scores=test_batch.confidence_scores or [],
+            )
             calibration_proba = model.predict_proba_full(split.calib_texts)
             test_proba = model.predict_proba_full(split.test_texts)
             comparator_scores = {
@@ -310,7 +537,9 @@ def classical_analysis(split) -> tuple[list[dict], list[dict]]:
                 )
                 comparator_rows.append(comparison)
 
-    return primary, comparator_rows
+    if cost_sensitivity is None:
+        raise RuntimeError("TF-IDF + LR cost sensitivity was not generated")
+    return primary, comparator_rows, cost_sensitivity
 
 
 def distilbert_analysis() -> tuple[dict, dict]:
@@ -353,8 +582,10 @@ def distilbert_analysis() -> tuple[dict, dict]:
     return primary, dense
 
 
-def llm_analysis() -> tuple[list[dict], list[dict], dict]:
-    raw_paths = sorted(LLM_BUNDLE.glob("*__model_reported.json"))
+def llm_analysis(
+    llm_bundle: Path, table_ii_input: Path
+) -> tuple[list[dict], list[dict], dict]:
+    raw_paths = sorted(llm_bundle.glob("*__model_reported.json"))
     raw_paths = [p for p in raw_paths if not p.name.startswith("tfidf_logreg")]
     if len(raw_paths) != 8:
         raise RuntimeError(f"expected 8 LLM conditions, found {len(raw_paths)}")
@@ -369,9 +600,11 @@ def llm_analysis() -> tuple[list[dict], list[dict], dict]:
         key: np.asarray(record["predictions"], dtype=object)
         for key, record in raw_records.items()
     }
-    classical = json.loads((LLM_BUNDLE / "tfidf_logreg__classical__model_reported.json").read_text())
+    classical = json.loads(
+        (llm_bundle / "tfidf_logreg__classical__model_reported.json").read_text()
+    )
     classical_predictions = np.asarray(classical["predictions"], dtype=object)
-    common_subset = json.loads(TABLE_II_INPUT.read_text())
+    common_subset = json.loads(table_ii_input.read_text())
     true_labels = np.asarray(common_subset["true_labels"], dtype=object)
     projected_classical_predictions = np.asarray(
         common_subset["models"]["tfidf_logreg"]["predictions"], dtype=object
@@ -392,8 +625,8 @@ def llm_analysis() -> tuple[list[dict], list[dict], dict]:
     for key in model_keys:
         raw = raw_records[key]
         prefix = raw_paths_by_key(raw_paths)[key].name.removesuffix("__model_reported.json")
-        isotonic = json.loads((LLM_BUNDLE / f"{prefix}__isotonic.json").read_text())
-        agreement = json.loads((LLM_BUNDLE / f"{prefix}__agreement.json").read_text())
+        isotonic = json.loads((llm_bundle / f"{prefix}__isotonic.json").read_text())
+        agreement = json.loads((llm_bundle / f"{prefix}__agreement.json").read_text())
         if not (
             raw["predictions"] == isotonic["predictions"] == agreement["predictions"]
         ):
@@ -559,6 +792,33 @@ def flatten_policy_record(record: dict) -> dict:
     }
 
 
+def flatten_cost_sensitivity_record(record: dict) -> dict:
+    costs = record["cost_parameters"]
+    selection = record["selection"]
+    test = record["test"]
+    reduction = test["relative_reduction_vs_lower_cost_trivial"]
+    return {
+        "correct_auto_route_cost": costs["correct_auto_route"],
+        "human_triage_cost": costs["human_triage"],
+        "wrong_auto_route_cost": costs["wrong_auto_route"],
+        "selection_split": selection["split"],
+        "threshold_grid": "0.01:0.01:0.99",
+        "selected_policy": selection["policy"],
+        "selected_threshold": selection["threshold"],
+        "calibration_cost": selection["expected_cost_per_ticket"],
+        "n_test": test["n_test"],
+        "test_policy_cost": test["policy_cost"],
+        "test_coverage": test["coverage"],
+        "test_accuracy_on_routed": test["accuracy_on_routed"],
+        "test_always_route_cost": test["always_route_cost"],
+        "test_always_defer_cost": test["always_defer_cost"],
+        "lower_cost_trivial_policy": test["lower_cost_trivial_policy"],
+        "relative_reduction_vs_lower_cost_trivial": reduction["point_estimate"],
+        "relative_reduction_ci_low": reduction["ci_low"],
+        "relative_reduction_ci_high": reduction["ci_high"],
+    }
+
+
 def write_csv(path: Path, rows: list[dict]) -> None:
     if not rows:
         raise ValueError(f"refusing to write empty CSV: {path}")
@@ -583,6 +843,8 @@ def write_audit_report(path: Path, manifest: dict) -> None:
         for row in manifest["llm_fixed_break_even_policy"]
         if row["model_condition"].startswith("haiku_few_shot")
     )
+    cost_sensitivity = manifest["lr_cost_model_sensitivity"]
+    cost_summary = cost_sensitivity["summary"]
     report = f"""# Camera-Ready Numerical Audit Report
 
 Generated exclusively from `claim_manifest.json`. Do not hand-copy values from
@@ -604,6 +866,14 @@ older tables or exploratory scripts.
   {distil_dense['selection']['threshold']:.2f} on calibration and produces a
   {100 * distil_dense['test']['relative_reduction_vs_always_route']['point_estimate']:.2f}%
   test reduction, supporting rather than replacing the predeclared-grid result.
+- In the post-hoc 16-setting cost-parameter sensitivity analysis, calibration
+  selects a threshold policy in
+  {cost_summary['threshold_policy_selected_on_calibration']}/16 settings. The
+  frozen policy beats both trivial policies on held-out test data in
+  {cost_summary['test_cost_lower_than_both_trivial_policies']}/16 settings;
+  every positive ratio-bootstrap interval excludes zero. One equal-cost
+  boundary selects always-route, and one calibration-selected threshold is
+  0.2% costlier than the lower-cost trivial test comparator.
 
 ## Reviewer concerns confirmed by the audit
 
@@ -623,8 +893,9 @@ older tables or exploratory scripts.
 ## Interpretation rule
 
 The audited manifest controls the camera-ready text. Any claim that conflicts
-with it must be corrected or removed. All cost conclusions are limited to this
-dataset and the illustrative (0,1,5) cost model.
+with it must be corrected or removed. The primary cost conclusion is limited to
+this dataset and the illustrative (0,1,5) cost model; the 16-setting analysis is
+post-hoc sensitivity evidence, not an organization-specific cost calibration.
 """
     path.write_text(report, encoding="utf-8")
 
@@ -632,8 +903,20 @@ dataset and the illustrative (0,1,5) cost model.
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--paper-dir", required=True, type=Path)
+    parser.add_argument(
+        "--artifact-dir",
+        type=Path,
+        default=REPO_ROOT / "artifacts" / "ictai2026",
+        help=(
+            "Directory containing llm_inputs/ and table_ii_common_subset.json. "
+            "Defaults to artifacts/ictai2026 inside the repository."
+        ),
+    )
     args = parser.parse_args()
     paper_dir = args.paper_dir.resolve()
+    artifact_dir = args.artifact_dir.resolve()
+    llm_bundle = artifact_dir / "llm_inputs"
+    table_ii_input = artifact_dir / "table_ii_common_subset.json"
     output_dir = paper_dir / "camera_ready_results"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -658,10 +941,12 @@ def main() -> None:
         ),
     }
 
-    classical, comparators = classical_analysis(split)
+    classical, comparators, cost_sensitivity = classical_analysis(split)
     distil_primary, distil_dense = distilbert_analysis()
     classical.append(distil_primary)
-    llm_confidence, llm_fixed, m9_validation = llm_analysis()
+    llm_confidence, llm_fixed, m9_validation = llm_analysis(
+        llm_bundle, table_ii_input
+    )
 
     source_zip = (
         paper_dir
@@ -690,6 +975,12 @@ def main() -> None:
                 "wrong_auto_route": COST.wrong_auto_route,
                 "status": "illustrative; organizations must estimate local costs",
             },
+            "cost_parameter_sensitivity": {
+                "analysis_role": "post_hoc",
+                "human_triage": COST_SENSITIVITY_TRIAGE,
+                "wrong_auto_route": COST_SENSITIVITY_WRONG,
+                "threshold_grid": "0.01 to 0.99 inclusive in steps of 0.01",
+            },
             "bootstrap": {
                 "method": "paired resampling of tickets with the reported ratio recomputed inside each resample",
                 "samples": BOOTSTRAP_SAMPLES,
@@ -702,10 +993,13 @@ def main() -> None:
             "default_config": {"path": str(DEFAULT_CONFIG.relative_to(REPO_ROOT)), "sha256": sha256_file(DEFAULT_CONFIG)},
             "classical_config": {"path": str(CLASSICAL_CONFIG.relative_to(REPO_ROOT)), "sha256": sha256_file(CLASSICAL_CONFIG)},
             "distilbert_predictions": {"path": str(DISTIL_PREDICTIONS.relative_to(REPO_ROOT)), "sha256": sha256_file(DISTIL_PREDICTIONS)},
-            "llm_common_labels": {"path": str(TABLE_II_INPUT.relative_to(REPO_ROOT)), "sha256": sha256_file(TABLE_II_INPUT)},
+            "llm_common_labels": {
+                "path": "artifacts/ictai2026/table_ii_common_subset.json",
+                "sha256": sha256_file(table_ii_input),
+            },
             "llm_bundle_files": {
-                str(path.relative_to(REPO_ROOT)): sha256_file(path)
-                for path in sorted(LLM_BUNDLE.glob("*.json"))
+                f"artifacts/ictai2026/llm_inputs/{path.name}": sha256_file(path)
+                for path in sorted(llm_bundle.glob("*.json"))
             },
             "submitted_source_zip": historical_archive_record(
                 source_zip,
@@ -729,6 +1023,7 @@ def main() -> None:
         },
         "classical_predeclared_grid": classical,
         "lr_rejection_comparators": comparators,
+        "lr_cost_model_sensitivity": cost_sensitivity,
         "distilbert_dense_grid_sensitivity": distil_dense,
         "llm_confidence_metrics": llm_confidence,
         "llm_fixed_break_even_policy": llm_fixed,
@@ -740,6 +1035,12 @@ def main() -> None:
             "all_m9_agreement_scores_match_saved": all(m9_validation.values()),
             "no_llm_policy_threshold_selected_on_test": True,
             "llm_fixed_threshold_derivation": "route when 5*(1-p)<=1, hence p>=0.80",
+            "cost_sensitivity_policies_selected_on_calibration": True,
+            "cost_sensitivity_test_rows_beating_both_trivial_policies": (
+                cost_sensitivity["summary"][
+                    "test_cost_lower_than_both_trivial_policies"
+                ]
+            ),
         },
     }
 
@@ -752,6 +1053,13 @@ def main() -> None:
     write_csv(
         output_dir / "lr_rejection_comparators.csv",
         [flatten_policy_record(row) for row in comparators],
+    )
+    write_csv(
+        output_dir / "lr_cost_model_sensitivity.csv",
+        [
+            flatten_cost_sensitivity_record(row)
+            for row in cost_sensitivity["rows"]
+        ],
     )
     write_csv(output_dir / "llm_confidence_metrics.csv", llm_confidence)
     write_csv(output_dir / "llm_fixed_break_even_policy.csv", llm_fixed)

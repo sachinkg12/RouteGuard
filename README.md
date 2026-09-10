@@ -6,10 +6,11 @@
 
 [![tests](https://github.com/sachinkg12/RouteGuard/actions/workflows/tests.yml/badge.svg)](https://github.com/sachinkg12/RouteGuard/actions/workflows/tests.yml)
 
-> **Publication status:** accepted at IEEE ICTAI 2026. The DOI and archival
-> IEEE Xplore URL are not yet available and will be added after publication.
+> **Publication status:** accepted at IEEE ICTAI 2026. The IEEE paper DOI and
+> archival Xplore URL are not yet available and will be added after publication.
 >
-> **Frozen ICTAI artifact:** prepared for archival deposit; DOI pending.
+> **Frozen ICTAI artifact:** published as a versioned series at
+> [Zenodo concept DOI 10.5281/zenodo.22609128](https://doi.org/10.5281/zenodo.22609128).
 > Paper-specific predictions and result records are intentionally not stored in Git.
 
 A research and evaluation framework for **selective prediction (abstention) in text
@@ -45,8 +46,9 @@ Everything is produced by one reproducible pipeline that snapshots its config, s
 dataset hash, and package versions alongside the results.
 
 The scoped camera-ready headline, controlling manifest, verification receipt, and
-text-free prediction vectors will be published together in the versioned artifact
-DOI. This repository remains the reusable software record; see
+text-free prediction vectors are published together at
+[concept DOI 10.5281/zenodo.22609128](https://doi.org/10.5281/zenodo.22609128).
+This repository remains the reusable software record; see
 [Artifact and publication status](#artifact-and-publication-status) for the
 release boundary and verification workflow.
 
@@ -152,22 +154,39 @@ commands.
 
 ### Reproduce the frozen ICTAI record
 
-**Artifact DOI: pending.** After publication, download the version-specific DOI
-archive and extract it into the repository root so that `artifacts/ictai2026/`
-exists locally. That directory is gitignored. Then run:
+**Artifact series:** [10.5281/zenodo.22609128](https://doi.org/10.5281/zenodo.22609128).
+For exact reproduction, use the code snapshot packaged with the latest Zenodo
+version rather than combining a mutable repository checkout with separately
+extracted files. Download `routeguard_camera_ready_supplementary.zip`, extract it
+in a clean directory, and enter its packaged code directory:
 
 ```bash
-.venv/bin/python scripts/verify_camera_ready_manifest.py \
-  --paper-dir artifacts/ictai2026
-.venv/bin/python scripts/verify_public_claims.py \
-  --artifact-dir artifacts/ictai2026
-.venv/bin/python scripts/baselines_on_llm_subsample.py \
-  --input artifacts/ictai2026/table_ii_common_subset.json
+unzip routeguard_camera_ready_supplementary.zip
+cd routeguard_camera_ready_supplement/code
 ```
 
-The first command also requires dataset version 1 at
-`data/it_service_tickets.csv`. The public-claim check and Table II reconstruction
-make no hosted-model API calls.
+Place dataset version 1 at `data/it_service_tickets.csv`, then run:
+
+```bash
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -e '.[test]' \
+  -c requirements-camera-ready-lock.txt
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/verify_camera_ready_manifest.py \
+  --paper-dir ../paper_artifacts
+.venv/bin/python scripts/verify_public_claims.py \
+  --artifact-dir artifacts/ictai2026
+.venv/bin/python scripts/baselines_on_llm_subsample.py
+```
+
+Strict receipt reproduction uses the archived run's CPython 3.14.3 x86-64
+environment. Re-fitting on another architecture may cause small floating-point
+differences or a few random-forest prediction changes despite identical seeds;
+the DOI's hashed frozen vectors and manifest are the portable audit record.
+
+The strict manifest verification requires the dataset. The public-claim check
+and Table II reconstruction use only packaged text-free files and make no
+hosted-model API calls.
 
 `run_classification.py` reports the configured threshold sweep. Use
 `select_threshold_on_calibration.py` for the deployment-style protocol: choose
@@ -290,18 +309,24 @@ methods, tables, uncertainty analysis, and interpretation:
 - Raw prompted-LLM ECE spans 0.332–0.594 and isotonic ECE spans 0.014–0.049, but
   lower ECE does not guarantee useful ranking. GPT-4o-mini few-shot has correctness
   AUROC 0.500 both before and after isotonic calibration.
+- A post-hoc 16-setting cost-parameter analysis selects one TF-IDF + LR policy
+  per setting on calibration. The frozen choice beats both always-route and always-defer on
+  held-out test data in 14 settings; one equal-cost boundary selects
+  always-route, and one setting is 0.2% costlier than the lower-cost trivial
+  comparator.
 
 The website is an explanatory companion, the repository is the reusable software,
-and the artifact DOI will be the frozen evidence package. After publication, IEEE
+and the [artifact series](https://doi.org/10.5281/zenodo.22609128) is the frozen
+evidence package. After publication, IEEE
 Xplore will be the authoritative paper record and citation destination.
 
 ## Artifact and publication status
 
 This repository contains reusable code, configurations, tests, and documentation.
 The paper-specific numerical evidence is intentionally distributed as a separate,
-immutable archival artifact. It has been frozen and audited locally; its DOI is
-pending. No DOI, Git tag, arXiv identifier, or IEEE Xplore URL is claimed before it
-exists.
+immutable archival artifact. Each deposited version is frozen under the Zenodo
+concept DOI below. No Git tag, arXiv identifier, or IEEE Xplore URL is claimed
+before it exists.
 
 ### Public now
 
@@ -317,18 +342,19 @@ exists.
 
 ### Frozen DOI artifact
 
-**Artifact DOI: pending.** The prepared archive contains:
+**Artifact series:** [10.5281/zenodo.22609128](https://doi.org/10.5281/zenodo.22609128).
+The concept DOI resolves to the latest published version. The archive contains:
 
 - the scoped public claim record;
 - the complete audited manifest at `camera_ready_results/claim_manifest.json` and
-  its 86-check verification receipt;
+  its automated recomputation receipt from a separate verification script;
 - aggregate camera-ready result tables;
 - sanitized, text-free LLM prediction/confidence vectors;
 - the sanitized Table II common-subset inputs;
 - the aggregate near-duplicate diagnostic; and
 - checksums and reproducibility instructions.
 
-The archive is held outside this Git repository until archival publication. See
+The archive is published separately from this Git repository. See
 [Reproduce the frozen ICTAI record](#reproduce-the-frozen-ictai-record) for the
 download layout and verification commands.
 
@@ -336,9 +362,9 @@ download layout and verification commands.
 
 | Item | Current status | Completion condition |
 |---|---|---|
-| Downloadable supplemental archive | Prepared and audited locally; public release pending | Deposit the final public-safe archive in the DOI-bearing archival record |
+| Downloadable supplemental archive | Published as a versioned Zenodo record | Available through [concept DOI 10.5281/zenodo.22609128](https://doi.org/10.5281/zenodo.22609128) |
 | Versioned software release | Pending | Tag the exact camera-ready commit after final verification |
-| Archival artifact DOI | Pending | Deposit the frozen release and result bundle in an archival repository |
+| Archival artifact DOI | Published | [Concept DOI 10.5281/zenodo.22609128](https://doi.org/10.5281/zenodo.22609128) |
 | Accepted-manuscript/arXiv record | Prepared locally; submission and identifier pending | Submit only the author-accepted/preprint version permitted by IEEE policy, with the required notice |
 | IEEE Xplore URL and paper DOI | Pending publication | Add only after IEEE assigns the archival record |
 
@@ -391,15 +417,18 @@ This is the companion code for:
 ```
 
 Machine-readable software and preferred paper citation metadata are available in
-[`CITATION.cff`](CITATION.cff). Add the DOI and IEEE Xplore URL there and above only
-after they have been assigned.
+[`CITATION.cff`](CITATION.cff). Add the IEEE paper DOI and Xplore URL there and
+above only after they have been assigned.
 
 ## License
 
 - **Code:** MIT (see `LICENSE`).
+- **Original DOI result evidence and artifact documentation:** CC BY 4.0, as
+  specified by the archive's `LICENSES.md`.
 - **Dataset:** upstream CC0 dedication; the data is not redistributed here.
-- **Manuscript and paper-derived material:** governed by the applicable IEEE
-  electronic copyright form. No IEEE Version of Record is hosted in this repo.
+- **IEEE manuscript and Version of Record:** not included in the DOI software
+  archive or this repository; governed separately by the applicable IEEE
+  publication agreement.
 
 This repository and its GitHub Pages site are independent project materials, not
 official IEEE or ICTAI websites. Author-posting guidance is maintained by the

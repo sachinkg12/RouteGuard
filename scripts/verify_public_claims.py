@@ -100,6 +100,34 @@ def verify_source(public: dict, source_path: Path) -> None:
     ):
         _assert_close(public_value, source_value, label)
 
+    sensitivity = source["lr_cost_model_sensitivity"]
+    sensitivity_public = public["cost_parameter_sensitivity"]
+    summary = sensitivity["summary"]
+    sensitivity_fields = {
+        "n_settings": sensitivity["cost_grid"]["n_settings"],
+        "threshold_policy_selected_on_calibration": summary[
+            "threshold_policy_selected_on_calibration"
+        ],
+        "test_cost_lower_than_both_trivial_policies": summary[
+            "test_cost_lower_than_both_trivial_policies"
+        ],
+        "test_cost_equal_to_lower_cost_trivial_policy": summary[
+            "test_cost_equal_to_lower_cost_trivial_policy"
+        ],
+        "test_cost_higher_than_lower_cost_trivial_policy": summary[
+            "test_cost_higher_than_lower_cost_trivial_policy"
+        ],
+        "positive_rows_with_ci_excluding_zero": summary[
+            "positive_rows_with_ratio_bootstrap_ci_excluding_zero"
+        ],
+    }
+    for field, expected in sensitivity_fields.items():
+        if sensitivity_public[field] != expected:
+            raise AssertionError(
+                f"cost sensitivity {field}: "
+                f"public={sensitivity_public[field]!r}, source={expected!r}"
+            )
+
     raw = _find(
         source["llm_confidence_metrics"],
         model_condition="gpt4o_mini_few_shot_k3__few_shot",
@@ -220,18 +248,23 @@ def verify_near_duplicate_record(record_path: Path) -> None:
 def verify_documents() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     site = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+    citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
     normalized_readme = " ".join(readme.split())
     normalized_site = " ".join(site.split())
     required_readme = (
         "accepted at IEEE ICTAI 2026",
-        "archival IEEE Xplore record pending",
-        "Artifact DOI: pending",
+        "The IEEE paper DOI and",
+        "archival Xplore URL are not yet available",
+        "10.5281/zenodo.22609128",
         "Paper-specific predictions and result records are intentionally not stored in Git",
         "0.477",
         "seven of eight",
+        "post-hoc 16-setting cost-parameter analysis",
+        "held-out test data in 14 settings",
         "IEEE Xplore will be the authoritative paper",
     )
     required_site = (
+        "IEEE paper DOI and Xplore record pending",
         "38.1%",
         "95% CI 35.7–40.4%",
         "correctness AUROC 0.500",
@@ -242,13 +275,17 @@ def verify_documents() -> None:
         "LLM-only M=8 control",
         "26 of 14,458 group-test tickets (0.18%)",
         "No IEEE Version of Record is hosted on this site.",
-        "The DOI is currently pending.",
-        "The framework supports configurable cost triples. The paper reports the illustrative (0, 1, 5) setting and threshold sensitivity.",
+        "versioned Zenodo record",
+        "routeguard_camera_ready_supplementary.zip",
+        "cd routeguard_camera_ready_supplement/code",
+        "requirements-camera-ready-lock.txt",
+        "--paper-dir ../paper_artifacts",
+        "A post-hoc 16-setting cost-parameter analysis selects one policy per setting on calibration; the frozen choice beats both trivial policies on held-out test data in 14 settings.",
     )
     # The artifact/publication boundary now lives in README's
     # "Artifact and publication status" section rather than a separate guide.
     required_artifact_text = (
-        "The archive is held outside this Git repository until archival publication.",
+        "The archive is published separately from this Git repository.",
         "camera_ready_results/claim_manifest.json",
         "GitHub contains no paper-specific prediction vectors or frozen result package",
         "not substitutes for the IEEE record",
@@ -264,6 +301,13 @@ def verify_documents() -> None:
             raise AssertionError(
                 f"README artifact/publication section is missing required text: {value}"
             )
+    required_citation = (
+        "value: 10.5281/zenodo.22609128",
+        "RouteGuard versioned artifact series",
+    )
+    for value in required_citation:
+        if value not in citation:
+            raise AssertionError(f"CITATION.cff is missing required text: {value}")
     obsolete_claims = (
         "The paper evaluates sensitivity across combinations of correct-route, triage, and wrong-route costs.",
         "swept over a grid of cost settings for robustness",
@@ -273,8 +317,15 @@ def verify_documents() -> None:
         "The repository also contains the audited, public-safe camera-ready record",
         "record is mirrored under [`artifacts/ictai2026/`]",
         "github.com/sachinkg12/RouteGuard/tree/main/artifacts/ictai2026",
+        "Artifact DOI: pending",
+        "The DOI is currently pending.",
+        "After the DOI is assigned",
+        "# DOI artifact extracts to artifacts/ictai2026/",
+        "--paper-dir artifacts/ictai2026",
+        "10.5281/zenodo.22609129",
+        "published as Zenodo version v1.0.0",
     )
-    joined = "\n".join((readme, site))
+    joined = "\n".join((readme, site, citation))
     for claim in obsolete_claims:
         if claim in joined:
             raise AssertionError(f"Public documentation still contains obsolete text: {claim}")

@@ -1,8 +1,10 @@
 cff-version: 1.2.0
 message: >-
   Cite the preferred conference paper when using its methods or findings, and cite
-  this software record when using the implementation. The archival paper DOI and
-  IEEE Xplore URL will be added only after publication.
+  the Zenodo artifact when using its implementation or frozen evidence. The
+  archival paper DOI and IEEE Xplore URL will be added only after publication.
+  The software package version below is distinct from the Zenodo artifact-record
+  version; the concept DOI resolves to the latest artifact release.
 title: RouteGuard — Cost-Aware Abstention for Text Classification
 type: software
 authors:
@@ -11,6 +13,11 @@ authors:
 repository-code: https://github.com/sachinkg12/RouteGuard
 url: https://sachinkg12.github.io/RouteGuard/
 version: 0.1.0
+date-released: 2026-09-07
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.22609128
+    description: RouteGuard versioned artifact series (resolves to the latest release)
 license: MIT
 keywords:
   - selective prediction

@@ -31,13 +31,6 @@ from ticket_routing.utils.hashing import sha256_iter_strings
 
 
 CONFIG = REPO_ROOT / "configs" / "experiment_default.yaml"
-LLM_RAW = (
-    REPO_ROOT
-    / "artifacts"
-    / "ictai2026"
-    / "llm_inputs"
-)
-TABLE_II_INPUT = REPO_ROOT / "artifacts" / "ictai2026" / "table_ii_common_subset.json"
 DISTIL = REPO_ROOT / "outputs" / "distilbert_calib_test_preds.json"
 BOOT = 1000
 SEED = 1337
@@ -73,6 +66,31 @@ def policy_costs(correctness: Sequence[bool], scores: Sequence[float], tau: floa
     always_route = np.where(correct, 0.0, 5.0)
     always_defer = np.ones(correct.size)
     return routed, policy, always_route, always_defer
+
+
+def sensitivity_policy_costs(
+    correctness: Sequence[bool],
+    scores: Sequence[float],
+    policy_name: str,
+    human_triage: float,
+    wrong_auto_route: float,
+):
+    """Independent cost calculation for the post-hoc cost grid."""
+    correct = np.asarray(correctness, dtype=bool)
+    confidence = np.asarray(scores, dtype=float)
+    if policy_name == "always_route":
+        routed = np.ones(correct.size, dtype=bool)
+    elif policy_name == "always_defer":
+        routed = np.zeros(correct.size, dtype=bool)
+    else:
+        threshold = float(policy_name.split("@", 1)[1])
+        routed = confidence >= threshold
+    policy = np.where(
+        routed,
+        np.where(correct, 0.0, wrong_auto_route),
+        human_triage,
+    ).astype(float)
+    return routed, policy
 
 
 def bootstrap_relative(policy: np.ndarray, baseline: np.ndarray) -> dict:
@@ -220,6 +238,153 @@ def compare_policy_record(
     )
 
 
+def verify_cost_sensitivity(
+    analysis: dict,
+    calibration_predictions: Sequence[str],
+    calibration_labels: Sequence[str],
+    calibration_scores: Sequence[float],
+    test_predictions: Sequence[str],
+    test_labels: Sequence[str],
+    test_scores: Sequence[float],
+) -> int:
+    equal(analysis["analysis_role"], "post_hoc_cost_parameter_sensitivity", "cost sensitivity role")
+    equal(analysis["model"], "TF-IDF + logistic regression", "cost sensitivity model")
+    equal(analysis["cost_grid"]["human_triage"], [0.5, 1.0, 1.5, 2.0], "triage grid")
+    equal(analysis["cost_grid"]["wrong_auto_route"], [2.0, 5.0, 10.0, 20.0], "wrong-route grid")
+    equal(analysis["cost_grid"]["n_settings"], 16, "cost sensitivity setting count")
+
+    calibration_correct = np.asarray(calibration_predictions) == np.asarray(
+        calibration_labels
+    )
+    test_correct = np.asarray(test_predictions) == np.asarray(test_labels)
+    rows = {
+        (
+            row["cost_parameters"]["human_triage"],
+            row["cost_parameters"]["wrong_auto_route"],
+        ): row
+        for row in analysis["rows"]
+    }
+    equal(len(rows), 16, "unique cost sensitivity rows")
+    positive = equal_to_trivial = negative = selected_threshold = selected_route = selected_defer = 0
+    positive_ci = 0
+    checks = 0
+    thresholds = [round(value / 100, 2) for value in range(1, 100)]
+    for human_triage in [0.5, 1.0, 1.5, 2.0]:
+        for wrong_auto_route in [2.0, 5.0, 10.0, 20.0]:
+            row = rows[(human_triage, wrong_auto_route)]
+            selection = row["selection"]
+            equal(selection["split"], "calibration", "cost sensitivity selection split")
+            equal(selection["n_selection_examples"], len(calibration_correct), "cost sensitivity calibration n")
+            equal(selection["threshold_grid"], thresholds, "cost sensitivity threshold grid")
+            equal(selection["candidate_policies"], 101, "cost sensitivity candidate count")
+
+            candidates = []
+            for rank, name in enumerate(("always_route", "always_defer")):
+                _, costs = sensitivity_policy_costs(
+                    calibration_correct,
+                    calibration_scores,
+                    name,
+                    human_triage,
+                    wrong_auto_route,
+                )
+                candidates.append((float(costs.mean()), rank, -1.0, name))
+            for threshold in thresholds:
+                name = f"threshold@{threshold:.2f}"
+                _, costs = sensitivity_policy_costs(
+                    calibration_correct,
+                    calibration_scores,
+                    name,
+                    human_triage,
+                    wrong_auto_route,
+                )
+                candidates.append((float(costs.mean()), 2, threshold, name))
+            expected_cost, _, threshold_key, expected_policy = min(
+                candidates, key=lambda item: (item[0], item[1], item[2])
+            )
+            expected_threshold = (
+                None if expected_policy.startswith("always_") else threshold_key
+            )
+            equal(selection["policy"], expected_policy, "cost sensitivity selected policy")
+            close(selection["threshold"], expected_threshold, "cost sensitivity selected threshold")
+            close(selection["expected_cost_per_ticket"], expected_cost, "cost sensitivity calibration cost")
+
+            routed, policy = sensitivity_policy_costs(
+                test_correct,
+                test_scores,
+                expected_policy,
+                human_triage,
+                wrong_auto_route,
+            )
+            _, always_route = sensitivity_policy_costs(
+                test_correct,
+                test_scores,
+                "always_route",
+                human_triage,
+                wrong_auto_route,
+            )
+            _, always_defer = sensitivity_policy_costs(
+                test_correct,
+                test_scores,
+                "always_defer",
+                human_triage,
+                wrong_auto_route,
+            )
+            if always_route.mean() <= always_defer.mean():
+                lower_name, lower = "always_route", always_route
+            else:
+                lower_name, lower = "always_defer", always_defer
+            test = row["test"]
+            equal(test["n_test"], len(test_correct), "cost sensitivity test n")
+            close(test["policy_cost"], policy.mean(), "cost sensitivity test cost")
+            close(test["coverage"], routed.mean(), "cost sensitivity coverage")
+            close(
+                test["accuracy_on_routed"],
+                float(test_correct[routed].mean()) if routed.any() else None,
+                "cost sensitivity routed accuracy",
+            )
+            close(test["always_route_cost"], always_route.mean(), "cost sensitivity always-route cost")
+            close(test["always_defer_cost"], always_defer.mean(), "cost sensitivity always-defer cost")
+            equal(test["lower_cost_trivial_policy"], lower_name, "cost sensitivity lower trivial policy")
+            compare_interval(
+                test["relative_reduction_vs_always_route"],
+                bootstrap_relative(policy, always_route),
+                "cost sensitivity relative vs route",
+                True,
+            )
+            compare_interval(
+                test["relative_reduction_vs_always_defer"],
+                bootstrap_relative(policy, always_defer),
+                "cost sensitivity relative vs defer",
+                True,
+            )
+            relative_lower = bootstrap_relative(policy, lower)
+            compare_interval(
+                test["relative_reduction_vs_lower_cost_trivial"],
+                relative_lower,
+                "cost sensitivity relative vs lower trivial",
+                True,
+            )
+            point = relative_lower["point_estimate"]
+            positive += point > 0.0
+            equal_to_trivial += point == 0.0
+            negative += point < 0.0
+            positive_ci += point > 0.0 and relative_lower["ci_low"] > 0.0
+            selected_threshold += expected_policy.startswith("threshold@")
+            selected_route += expected_policy == "always_route"
+            selected_defer += expected_policy == "always_defer"
+            checks += 1
+
+    summary = analysis["summary"]
+    equal(summary["threshold_policy_selected_on_calibration"], selected_threshold, "cost sensitivity threshold selections")
+    equal(summary["always_route_selected_on_calibration"], selected_route, "cost sensitivity route selections")
+    equal(summary["always_defer_selected_on_calibration"], selected_defer, "cost sensitivity defer selections")
+    equal(summary["test_cost_lower_than_both_trivial_policies"], positive, "cost sensitivity positive test rows")
+    equal(summary["test_cost_equal_to_lower_cost_trivial_policy"], equal_to_trivial, "cost sensitivity equal test rows")
+    equal(summary["test_cost_higher_than_lower_cost_trivial_policy"], negative, "cost sensitivity negative test rows")
+    equal(summary["positive_rows_with_ratio_bootstrap_ci_excluding_zero"], positive_ci, "cost sensitivity positive CI rows")
+    return checks
+
+
 def ece(scores: np.ndarray, correctness: np.ndarray) -> float:
     edges = np.linspace(0.0, 1.0, 11)
     total = 0.0
@@ -254,7 +419,16 @@ def tie_aurc(scores: np.ndarray, correctness: np.ndarray) -> float:
     return float(area)
 
 
-def verify_inputs(manifest: dict, paper_dir: Path) -> tuple[int, list[str]]:
+def _resolve_input_path(relative: str, artifact_dir: Path) -> Path:
+    parts = Path(relative).parts
+    if parts[:2] == ("artifacts", "ictai2026"):
+        return artifact_dir.joinpath(*parts[2:])
+    return REPO_ROOT / relative
+
+
+def verify_inputs(
+    manifest: dict, paper_dir: Path, artifact_dir: Path
+) -> tuple[int, list[str]]:
     checks = 0
     skipped: list[str] = []
     inputs = manifest["inputs"]
@@ -267,11 +441,15 @@ def verify_inputs(manifest: dict, paper_dir: Path) -> tuple[int, list[str]]:
     ]
     for key in simple:
         item = inputs[key]
-        close_path = REPO_ROOT / item["path"]
+        close_path = _resolve_input_path(item["path"], artifact_dir)
         equal(file_hash(close_path), item["sha256"], f"input hash {key}")
         checks += 1
     for relative, expected_hash in inputs["llm_bundle_files"].items():
-        equal(file_hash(REPO_ROOT / relative), expected_hash, f"input hash {relative}")
+        equal(
+            file_hash(_resolve_input_path(relative, artifact_dir)),
+            expected_hash,
+            f"input hash {relative}",
+        )
         checks += 1
     for key in ["submitted_source_zip", "submitted_supplement_zip"]:
         item = inputs[key]
@@ -353,6 +531,15 @@ def verify_classical(manifest: dict, split) -> int:
                     f"LR comparator {score_name}",
                 )
                 checks += 1
+            checks += verify_cost_sensitivity(
+                manifest["lr_cost_model_sensitivity"],
+                calibration.predicted_labels,
+                split.calib_labels,
+                calibration.confidence_scores or [],
+                test.predicted_labels,
+                split.test_labels,
+                test.confidence_scores or [],
+            )
     return checks
 
 
@@ -395,8 +582,8 @@ def correctness(record: dict) -> np.ndarray:
     return (np.asarray(row["per_ticket_costs"], dtype=float) == 0.0).astype(int)
 
 
-def verify_llms(manifest: dict) -> int:
-    raw_paths = sorted(LLM_RAW.glob("*__model_reported.json"))
+def verify_llms(manifest: dict, llm_raw: Path, table_ii_input: Path) -> int:
+    raw_paths = sorted(llm_raw.glob("*__model_reported.json"))
     raw_paths = [path for path in raw_paths if not path.name.startswith("tfidf_logreg")]
     raw_records = {
         path.name.removesuffix("__model_reported.json"): json.loads(path.read_text())
@@ -406,9 +593,11 @@ def verify_llms(manifest: dict) -> int:
         key: np.asarray(record["predictions"], dtype=object)
         for key, record in raw_records.items()
     }
-    classical = json.loads((LLM_RAW / "tfidf_logreg__classical__model_reported.json").read_text())
+    classical = json.loads(
+        (llm_raw / "tfidf_logreg__classical__model_reported.json").read_text()
+    )
     classical_predictions = np.asarray(classical["predictions"], dtype=object)
-    common_subset = json.loads(TABLE_II_INPUT.read_text())
+    common_subset = json.loads(table_ii_input.read_text())
     true_labels = np.asarray(common_subset["true_labels"], dtype=object)
     projected_classical_predictions = np.asarray(
         common_subset["models"]["tfidf_logreg"]["predictions"], dtype=object
@@ -431,8 +620,8 @@ def verify_llms(manifest: dict) -> int:
     checks = 0
     for key, raw in raw_records.items():
         prefix = key
-        iso = json.loads((LLM_RAW / f"{prefix}__isotonic.json").read_text())
-        agr = json.loads((LLM_RAW / f"{prefix}__agreement.json").read_text())
+        iso = json.loads((llm_raw / f"{prefix}__isotonic.json").read_text())
+        agr = json.loads((llm_raw / f"{prefix}__agreement.json").read_text())
         outcome = correctness(raw)
         label_correctness = (
             np.asarray(raw["predictions"], dtype=object) == true_labels
@@ -554,6 +743,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--paper-dir", required=True, type=Path)
     parser.add_argument(
+        "--artifact-dir",
+        type=Path,
+        default=REPO_ROOT / "artifacts" / "ictai2026",
+        help=(
+            "Directory containing llm_inputs/ and table_ii_common_subset.json. "
+            "Defaults to artifacts/ictai2026 inside the repository."
+        ),
+    )
+    parser.add_argument(
         "--receipt-output",
         type=Path,
         default=None,
@@ -565,10 +763,13 @@ def main() -> None:
     )
     args = parser.parse_args()
     paper_dir = args.paper_dir.resolve()
+    artifact_dir = args.artifact_dir.resolve()
+    llm_raw = artifact_dir / "llm_inputs"
+    table_ii_input = artifact_dir / "table_ii_common_subset.json"
     manifest_path = paper_dir / "camera_ready_results" / "claim_manifest.json"
     manifest = json.loads(manifest_path.read_text())
 
-    checks, skipped = verify_inputs(manifest, paper_dir)
+    checks, skipped = verify_inputs(manifest, paper_dir, artifact_dir)
     cfg = load_config(CONFIG)
     bundle = build_loader_from_config(cfg.dataset).load()
     split = stratified_three_way_split(
@@ -594,7 +795,7 @@ def main() -> None:
     checks += 4
     checks += verify_classical(manifest, split)
     checks += verify_distilbert(manifest)
-    checks += verify_llms(manifest)
+    checks += verify_llms(manifest, llm_raw, table_ii_input)
 
     receipt = {
         "status": "PASS",
@@ -607,7 +808,8 @@ def main() -> None:
             "All numerical fields present in claim_manifest.json—including its listed "
             "source and split hashes, classical operating points and bootstrap intervals, "
             "LLM confidence and agreement metrics, rejection comparators, and dense "
-            "DistilBERT sensitivity—were independently recomputed from the manifest's "
+            "DistilBERT and 16-setting cost-parameter sensitivity analyses—were "
+            "independently recomputed from the manifest's "
             "listed inputs. Secondary analyses and manuscript values outside the manifest "
             "are not covered by this receipt."
         ),

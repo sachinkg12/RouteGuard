@@ -13,6 +13,8 @@ import matplotlib
 matplotlib.use("Agg")  # headless
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import PowerNorm
+from PIL import Image
 
 # Shared color palette for report figures.
 PAPER_TEAL = "#1F6F8B"      # bar fill, line accent
@@ -41,10 +43,19 @@ def _apply_paper_style() -> None:
         "grid.color": PAPER_GREY_GRID,
         "grid.linewidth": 0.4,
         "figure.dpi": 150,
-        "savefig.dpi": 220,
+        "savefig.dpi": 400,
         "savefig.bbox": "tight",
         "savefig.pad_inches": 0.05,
     })
+
+
+def _save_rgb_png(fig, path: Path, *, dpi: int = 400) -> None:
+    """Save a publication-resolution, opaque RGB PNG."""
+    fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white", transparent=False)
+    rgb_path = path.with_name(f".{path.stem}.rgb.png")
+    with Image.open(path) as rendered:
+        rendered.convert("RGB").save(rgb_path, format="PNG", dpi=(dpi, dpi), optimize=True)
+    rgb_path.replace(path)
 
 
 PIPELINE_MERMAID = """flowchart LR
@@ -104,7 +115,7 @@ def _render_pipeline_png(path: Path) -> None:
     ax.text(7.55, 0.45, "low conf.", ha="center", va="top", fontsize=8, color="#a35a1d", style="italic")
 
     fig.tight_layout()
-    fig.savefig(path, dpi=180, bbox_inches="tight")
+    _save_rgb_png(fig, path)
     plt.close(fig)
 
 
@@ -137,7 +148,7 @@ def save_class_distribution(out_dir: Path, labels: Sequence[str]) -> None:
     ax.set_axisbelow(True)
     ax.tick_params(axis="y", length=0)
     fig.tight_layout()
-    fig.savefig(out_dir / "figure_2_class_distribution.png")
+    _save_rgb_png(fig, out_dir / "figure_2_class_distribution.png")
     plt.close(fig)
 
 
@@ -162,7 +173,7 @@ def save_coverage_accuracy_curve(out_dir: Path, results) -> None:
     ax.set_title("Coverage vs. accuracy")
     ax.legend(loc="lower left", fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_dir / "figure_3_coverage_accuracy.png", dpi=150)
+    _save_rgb_png(fig, out_dir / "figure_3_coverage_accuracy.png")
     plt.close(fig)
 
 
@@ -188,21 +199,26 @@ def save_cost_threshold_curve(out_dir: Path, results, default_wrong_cost: float)
     ax.set_title(f"Cost vs. threshold (wrong-route cost={default_wrong_cost})")
     ax.legend(loc="best", fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_dir / "figure_4_cost_threshold.png", dpi=150)
+    _save_rgb_png(fig, out_dir / "figure_4_cost_threshold.png")
     plt.close(fig)
 
 
 def save_confusion_matrix(
     out_dir: Path, cm: list[list[int]], labels: Sequence[str], filename: str, title: str
 ) -> None:
-    """Sequential-Blues confusion matrix with thin white grid between cells."""
+    """Power-scaled confusion matrix with the largest off-diagonal counts labeled."""
     out_dir.mkdir(parents=True, exist_ok=True)
     _apply_paper_style()
     cm_arr = np.asarray(cm, dtype=float)
     n = len(labels)
     side = max(4.0, 0.55 * n)
     fig, ax = plt.subplots(figsize=(side, side))
-    im = ax.imshow(cm_arr, cmap="Blues", aspect="equal")
+    im = ax.imshow(
+        cm_arr,
+        cmap="Blues",
+        aspect="equal",
+        norm=PowerNorm(gamma=0.5, vmin=0, vmax=max(float(cm_arr.max()), 1.0)),
+    )
     # Thin white grid between cells.
     ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
     ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
@@ -216,13 +232,36 @@ def save_confusion_matrix(
     ax.tick_params(axis="both", which="major", length=0)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
+    # Label the three most frequent errors so a dominant diagonal does not hide
+    # the failure modes discussed in the paper.
+    error_cells = sorted(
+        (
+            (int(cm_arr[row, col]), row, col)
+            for row in range(n)
+            for col in range(n)
+            if row != col and cm_arr[row, col] > 0
+        ),
+        reverse=True,
+    )[:3]
+    for value, row, col in error_cells:
+        ax.add_patch(
+            plt.Rectangle(
+                (col - 0.5, row - 0.5),
+                1,
+                1,
+                fill=False,
+                edgecolor=PAPER_STROKE,
+                linewidth=1.0,
+            )
+        )
+        ax.text(col, row, f"{value}", ha="center", va="center", fontsize=7, color="#111111")
     # Strip outer spines (cells alone carry the visual story).
     for spine in ax.spines.values():
         spine.set_visible(False)
     cbar = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.04)
-    cbar.set_label("Count", fontsize=8)
+    cbar.set_label("Count (square-root color scale)", fontsize=8)
     cbar.ax.tick_params(labelsize=7, length=2, width=0.4)
     cbar.outline.set_linewidth(0.4)
     fig.tight_layout()
-    fig.savefig(out_dir / filename)
+    _save_rgb_png(fig, out_dir / filename)
     plt.close(fig)

@@ -71,7 +71,7 @@
       <div class="publication-chip">
         <span>Accepted paper</span>
         <b>IEEE ICTAI 2026</b>
-        <small>DOI and archival IEEE Xplore link pending</small>
+        <small>IEEE paper DOI and Xplore record pending</small>
       </div>
       <div class="eyebrow">IT ticket routing with selective prediction</div>
       <h1>Know when <span>not to answer.</span></h1>
@@ -185,7 +185,7 @@
         <article><span>Predictors</span><h3>Classical &amp; LLM</h3><p>TF-IDF (LR / SVM / RF), fine-tuned DistilBERT, and prompted LLMs share one prediction interface.</p></article>
         <article><span>Confidence</span><h3>Several signals</h3><p>Model-reported score, cross-predictor agreement, and optional held-out isotonic recalibration.</p></article>
         <article><span>Abstention</span><h3>Threshold policies</h3><p>Route above a displayed threshold and defer below it; always-route and always-defer are reference policies.</p></article>
-        <article><span>Cost</span><h3>Explicit &amp; configurable</h3><p>The framework supports configurable cost triples. The paper reports the illustrative (0, 1, 5) setting and threshold sensitivity.</p></article>
+        <article><span>Cost</span><h3>Explicit &amp; configurable</h3><p>The primary paper result uses illustrative costs (0, 1, 5). A post-hoc 16-setting cost-parameter analysis selects one policy per setting on calibration; the frozen choice beats both trivial policies on held-out test data in 14 settings.</p></article>
       </div>
     </section>
 
@@ -290,19 +290,26 @@ pytest</code></pre>
         <article>
           <span class="path-label">Evidence verification</span>
           <h3>Check the frozen camera-ready record</h3>
-          <p>After the DOI is assigned, extract its archive into the repository root, download dataset version 1, then verify the frozen record.</p>
-          <pre><code># DOI artifact extracts to artifacts/ictai2026/
-python scripts/verify_camera_ready_manifest.py \
-  --paper-dir artifacts/ictai2026
-python scripts/verify_public_claims.py \
+          <p>Download the latest Zenodo archive, extract it in a clean directory,
+            enter its packaged <code>code/</code> directory, and place dataset
+            version 1 at <code>data/it_service_tickets.csv</code>.</p>
+          <pre><code>unzip routeguard_camera_ready_supplementary.zip
+cd routeguard_camera_ready_supplement/code
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -e '.[test]' \
+  -c requirements-camera-ready-lock.txt
+.venv/bin/python -m pytest -q
+.venv/bin/python scripts/verify_camera_ready_manifest.py \
+  --paper-dir ../paper_artifacts
+.venv/bin/python scripts/verify_public_claims.py \
   --artifact-dir artifacts/ictai2026
-python scripts/baselines_on_llm_subsample.py \
-  --input artifacts/ictai2026/table_ii_common_subset.json</code></pre>
+.venv/bin/python scripts/baselines_on_llm_subsample.py</code></pre>
         </article>
       </div>
 
       <div class="callout">
-        <div><h3>Dataset and artifact status</h3><p>The <a href="https://www.kaggle.com/datasets/adisongoh/it-service-ticket-classification-dataset/versions/1">source dataset</a> is CC0 and is not redistributed. The audited public-safe evidence package is stored separately from GitHub and will be linked here through its version-specific DOI. The DOI is currently pending.</p></div>
+        <div><h3>Dataset and artifact status</h3><p>The <a href="https://www.kaggle.com/datasets/adisongoh/it-service-ticket-classification-dataset/versions/1">source dataset</a> is CC0 and is not redistributed. The audited public-safe evidence package is stored separately from GitHub as a versioned Zenodo record.</p></div>
+        <a href="https://doi.org/10.5281/zenodo.22609128">Open latest artifact ↗</a>
       </div>
     </section>
 
@@ -347,8 +354,8 @@ python scripts/baselines_on_llm_subsample.py \
           <span class="path-label">Publication record</span>
           <h2>Companion site—not the archival paper.</h2>
           <p><i>Cost-Aware Abstention for LLM-Based IT Ticket Classification</i>,
-            Sachin Gupta. Accepted at IEEE ICTAI 2026. The DOI and IEEE Xplore URL
-            will be added after publication. The complete methods, tables,
+            Sachin Gupta. Accepted at IEEE ICTAI 2026. The IEEE paper DOI and
+            Xplore record will be added after publication. The complete methods, tables,
             uncertainty analysis, limitations, and interpretation belong to that
             archival paper; this page is a navigation and verification aid.</p>
         </div>
@@ -359,10 +366,11 @@ python scripts/baselines_on_llm_subsample.py \
           <a href="https://conferences.ieeeauthorcenter.ieee.org/author-ethics/guidelines-and-policies/submission-policies/">IEEE author posting policy ↗</a>
         </div>
       </div>
-      <p class="rights-note"><b>Rights:</b> code is MIT-licensed; the dataset retains
-        its upstream CC0 dedication; manuscript and paper-derived material are
-        governed by the applicable IEEE electronic copyright form. This independent
-        project site is not an official IEEE or ICTAI website.</p>
+      <p class="rights-note"><b>Rights:</b> project code is MIT-licensed; original
+        evidence in the DOI artifact is CC BY 4.0; the dataset retains its upstream
+        CC0 dedication and is not redistributed; the IEEE manuscript is not hosted
+        here and is governed separately by the applicable publication agreement.
+        This independent project site is not an official IEEE or ICTAI website.</p>
     </section>
   </main>
 
@@ -370,7 +378,7 @@ python scripts/baselines_on_llm_subsample.py \
     <div>
       <b>RouteGuard</b>
       <span>MIT-licensed evaluation framework · dataset not redistributed</span>
-      <span class="foot-cite">Companion code for an accepted IEEE ICTAI 2026 paper. DOI and IEEE Xplore link pending.</span>
+      <span class="foot-cite">Companion code for an accepted IEEE ICTAI 2026 paper. IEEE paper DOI and Xplore record pending.</span>
     </div>
     <div><a href="#overview">Top ↑</a><a href="#publication">Paper status</a><a href="https://github.com/sachinkg12/RouteGuard">GitHub ↗</a></div>
   </footer>
